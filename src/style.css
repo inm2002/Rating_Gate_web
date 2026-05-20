@@ -26,6 +26,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   min-width: 320px;
   min-height: 100vh;
@@ -105,9 +109,15 @@ h1 {
   font-size: 0.92rem;
 }
 
-.mode-switch {
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mode-switch,
+.view-switch {
   display: inline-grid;
-  grid-template-columns: repeat(2, 1fr);
   gap: 3px;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -116,7 +126,13 @@ h1 {
   box-shadow: var(--shadow-sm);
 }
 
-.mode-switch button {
+.mode-switch,
+.view-switch {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.mode-switch button,
+.view-switch button {
   min-width: 78px;
   min-height: 36px;
   border-radius: 6px;
@@ -131,7 +147,8 @@ h1 {
     box-shadow 0.16s ease;
 }
 
-.mode-switch button[aria-pressed='true'] {
+.mode-switch button[aria-pressed='true'],
+.view-switch button[aria-pressed='true'] {
   background: var(--ink);
   color: #fff;
   box-shadow: 0 10px 22px rgba(20, 22, 29, 0.18);
@@ -142,6 +159,164 @@ h1 {
   grid-template-columns: minmax(0, 1fr) 360px;
   gap: 18px;
   align-items: start;
+}
+
+.multiplayer-view {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.82fr) minmax(0, 1.18fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.room-card {
+  min-width: 0;
+  border: 1px solid rgba(223, 227, 232, 0.92);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.88);
+  padding: 22px;
+  box-shadow: var(--shadow-lg);
+}
+
+.room-entry {
+  display: grid;
+  gap: 18px;
+}
+
+.room-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.eyebrow {
+  color: var(--accent-deep);
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.room-heading h2 {
+  margin-top: 5px;
+  color: var(--ink);
+  font-size: clamp(1.35rem, 2.2vw, 1.75rem);
+  font-weight: 850;
+}
+
+.room-state {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  border: 1px solid rgba(216, 95, 134, 0.26);
+  border-radius: 999px;
+  background: rgba(216, 95, 134, 0.09);
+  color: var(--accent-deep);
+  padding: 0 11px;
+  font-size: 0.78rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.room-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.room-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.room-message {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.room-lobby {
+  display: grid;
+  gap: 22px;
+}
+
+.lobby-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+}
+
+.lobby-panel {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
+.compact-title {
+  margin: 0;
+}
+
+.compact-title h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.96rem;
+}
+
+.player-list {
+  display: grid;
+  gap: 8px;
+}
+
+.player-row,
+.room-settings div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  border-bottom: 1px solid rgba(223, 227, 232, 0.78);
+  color: var(--ink);
+}
+
+.player-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 780;
+}
+
+.player-row b,
+.room-settings dd {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 780;
+  white-space: nowrap;
+}
+
+.player-row.is-you b {
+  color: var(--accent-deep);
+}
+
+.player-row.is-empty {
+  color: var(--muted);
+}
+
+.room-settings {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.room-settings dt {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.room-actions .primary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  transform: none;
 }
 
 .stage,
@@ -286,6 +461,7 @@ h1 {
 .ghost-button:focus-visible,
 .primary-button:focus-visible,
 .mode-switch button:focus-visible,
+.view-switch button:focus-visible,
 .preset-row button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
@@ -725,7 +901,8 @@ h1 {
 }
 
 @media (max-width: 1080px) {
-  .game-layout {
+  .game-layout,
+  .multiplayer-view {
     grid-template-columns: 1fr;
   }
 
@@ -750,6 +927,12 @@ h1 {
     flex-direction: column;
   }
 
+  .header-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .view-switch,
   .mode-switch {
     width: 100%;
   }
@@ -768,6 +951,15 @@ h1 {
     align-items: stretch;
     flex-direction: column;
     padding: 16px;
+  }
+
+  .room-card {
+    padding: 18px;
+  }
+
+  .room-form-grid,
+  .lobby-grid {
+    grid-template-columns: 1fr;
   }
 
   .versus {

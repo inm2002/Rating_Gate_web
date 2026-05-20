@@ -24,12 +24,19 @@ import {
   type Stats,
 } from './game-core'
 
+type AppView = 'solo' | 'multiplayer'
 type Phase = 'loading' | 'ready' | 'playing' | 'reveal' | 'ended'
 
 interface AnimeSeedMeta {
   generatedAt: string
   source: string
   count: number
+}
+
+interface LocalRoom {
+  code: string
+  nickname: string
+  role: '房主' | '玩家'
 }
 
 const BEST_KEY = 'aniscore-arena-best-v1'
@@ -41,6 +48,8 @@ let allAnime: Anime[] = []
 let dataUpdatedAt = ''
 let pool: Anime[] = []
 let seen = new Set<number>()
+let appView: AppView = 'solo'
+let localRoom: LocalRoom | null = null
 let mode: Mode = 'classic'
 let phase: Phase = 'loading'
 let left: Anime | null = null
@@ -68,13 +77,19 @@ app.innerHTML = `
           <p>Bangumi 评分挑战</p>
         </div>
       </div>
-      <div class="mode-switch" aria-label="游戏模式">
-        <button id="mode-classic" type="button" aria-pressed="true">经典</button>
-        <button id="mode-timed" type="button" aria-pressed="false">限时</button>
+      <div class="header-actions">
+        <div class="view-switch" aria-label="玩法入口">
+          <button id="view-solo" type="button" aria-pressed="true">单人挑战</button>
+          <button id="view-multiplayer" type="button" aria-pressed="false">多人房间</button>
+        </div>
+        <div class="mode-switch" id="solo-mode-switch" aria-label="游戏模式">
+          <button id="mode-classic" type="button" aria-pressed="true">经典</button>
+          <button id="mode-timed" type="button" aria-pressed="false">限时</button>
+        </div>
       </div>
     </header>
 
-    <div class="game-layout">
+    <div class="game-layout" id="solo-view">
       <section class="stage" aria-live="polite">
         <div class="stage-head">
           <div>
@@ -187,6 +202,72 @@ app.innerHTML = `
       </aside>
     </div>
 
+    <section class="multiplayer-view" id="multiplayer-view" hidden>
+      <div class="room-card room-entry">
+        <div class="room-heading">
+          <div>
+            <p class="eyebrow">多人模式</p>
+            <h2>创建或加入房间</h2>
+          </div>
+          <span class="room-state" id="room-entry-state">本地预览</span>
+        </div>
+
+        <div class="room-form-grid">
+          <label class="control-field">
+            <span>昵称</span>
+            <input id="player-name" type="text" maxlength="16" value="鉴分员" autocomplete="nickname" />
+          </label>
+          <label class="control-field">
+            <span>房间码</span>
+            <input id="room-code-input" type="text" maxlength="6" placeholder="例如 A7K2Q9" autocomplete="off" />
+          </label>
+        </div>
+
+        <div class="room-actions">
+          <button class="primary-button" id="create-room" type="button">创建房间</button>
+          <button class="ghost-button" id="join-room" type="button">加入房间</button>
+        </div>
+        <p class="room-message" id="room-message">房间界面已就绪，下一步接入本地 WebSocket 服务。</p>
+      </div>
+
+      <div class="room-card room-lobby" id="room-lobby" hidden>
+        <div class="room-heading">
+          <div>
+            <p class="eyebrow" id="room-role">房主</p>
+            <h2>房间 <span id="room-code">------</span></h2>
+          </div>
+          <span class="room-state" id="room-status">等待玩家</span>
+        </div>
+
+        <div class="lobby-grid">
+          <section class="lobby-panel">
+            <div class="panel-title compact-title">
+              <h3>玩家</h3>
+              <span id="room-player-count">1/8</span>
+            </div>
+            <div class="player-list" id="room-player-list"></div>
+          </section>
+
+          <section class="lobby-panel">
+            <div class="panel-title compact-title">
+              <h3>比赛设置</h3>
+              <span>10 题</span>
+            </div>
+            <dl class="room-settings">
+              <div><dt>题库</dt><dd id="room-pool">-- 部</dd></div>
+              <div><dt>作答</dt><dd>15 秒/题</dd></div>
+              <div><dt>计分</dt><dd>答对 +1，连击加权待定</dd></div>
+            </dl>
+          </section>
+        </div>
+
+        <div class="room-actions">
+          <button class="primary-button" id="room-start" type="button" disabled>开始比赛</button>
+          <button class="ghost-button" id="leave-room" type="button">离开房间</button>
+        </div>
+      </div>
+    </section>
+
     <footer class="site-footer">
       <span>数据来源 <a href="https://bangumi.tv/" target="_blank" rel="noopener">Bangumi</a></span>
       <span>参考来源 <a href="https://bangumi-master.logicry.cc/" target="_blank" rel="noopener">目标是Bangumi大师</a></span>
@@ -234,6 +315,11 @@ const $ = <T extends HTMLElement>(id: string) => {
 const byId = {
   prompt: $('prompt'),
   roundNote: $('round-note'),
+  viewSolo: $('view-solo') as HTMLButtonElement,
+  viewMultiplayer: $('view-multiplayer') as HTMLButtonElement,
+  soloView: $('solo-view'),
+  multiplayerView: $('multiplayer-view'),
+  soloModeSwitch: $('solo-mode-switch'),
   modeClassic: $('mode-classic') as HTMLButtonElement,
   modeTimed: $('mode-timed') as HTMLButtonElement,
   restart: $('restart') as HTMLButtonElement,
@@ -257,6 +343,20 @@ const byId = {
   yearMin: $('year-min') as HTMLInputElement,
   yearMax: $('year-max') as HTMLInputElement,
   ranking: $('ranking') as HTMLSelectElement,
+  playerName: $('player-name') as HTMLInputElement,
+  roomCodeInput: $('room-code-input') as HTMLInputElement,
+  createRoom: $('create-room') as HTMLButtonElement,
+  joinRoom: $('join-room') as HTMLButtonElement,
+  roomMessage: $('room-message'),
+  roomLobby: $('room-lobby'),
+  roomRole: $('room-role'),
+  roomCode: $('room-code'),
+  roomStatus: $('room-status'),
+  roomPool: $('room-pool'),
+  roomPlayerCount: $('room-player-count'),
+  roomPlayerList: $('room-player-list'),
+  roomStart: $('room-start') as HTMLButtonElement,
+  leaveRoom: $('leave-room') as HTMLButtonElement,
   excludes: {
     guochan: $('exclude-guochan') as HTMLInputElement,
     movies: $('exclude-movies') as HTMLInputElement,
@@ -298,11 +398,116 @@ function formatUpdatedAt(value: string) {
 function applyFilters() {
   pool = filterAnime(allAnime, settings)
   byId.poolCount.textContent = `${pool.length} 部`
+  byId.roomPool.textContent = `${pool.length} 部`
 }
 
 function setPrompt(text: string, tone: 'neutral' | 'good' | 'bad' = 'neutral') {
   byId.prompt.textContent = text
   byId.prompt.dataset.tone = tone
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (char) => {
+    const entities: Record<string, string> = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    }
+    return entities[char] ?? char
+  })
+}
+
+function renderAppView() {
+  const isSolo = appView === 'solo'
+  byId.soloView.hidden = !isSolo
+  byId.multiplayerView.hidden = isSolo
+  byId.soloModeSwitch.hidden = !isSolo
+  byId.viewSolo.setAttribute('aria-pressed', isSolo ? 'true' : 'false')
+  byId.viewMultiplayer.setAttribute('aria-pressed', isSolo ? 'false' : 'true')
+}
+
+function switchView(nextView: AppView) {
+  appView = nextView
+  if (nextView === 'multiplayer') {
+    stopTimer()
+    if (byId.timedReadyDialog.open) byId.timedReadyDialog.close()
+  }
+  renderAppView()
+  renderRoom()
+}
+
+function normalizeRoomCode(value: string) {
+  return value.replace(/[^a-z0-9]/gi, '').toUpperCase().slice(0, 6)
+}
+
+function generateRoomCode() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  let code = ''
+  for (let index = 0; index < 6; index += 1) {
+    code += alphabet[Math.floor(Math.random() * alphabet.length)]
+  }
+  return code
+}
+
+function currentNickname() {
+  return byId.playerName.value.trim().slice(0, 16) || '鉴分员'
+}
+
+function renderRoom() {
+  byId.roomLobby.hidden = !localRoom
+  byId.roomPool.textContent = `${pool.length} 部`
+  if (!localRoom) {
+    byId.roomMessage.textContent = '房间界面已就绪，下一步接入本地 WebSocket 服务。'
+    return
+  }
+  byId.roomCode.textContent = localRoom.code
+  byId.roomRole.textContent = localRoom.role
+  byId.roomStatus.textContent = localRoom.role === '房主' ? '等待玩家' : '已加入'
+  byId.roomMessage.textContent =
+    localRoom.role === '房主' ? `房间 ${localRoom.code} 已创建。` : `已加入房间 ${localRoom.code}。`
+  byId.roomPlayerCount.textContent = localRoom.role === '房主' ? '1/8' : '2/8'
+  const waitingRow =
+    localRoom.role === '房主'
+      ? '<div class="player-row is-empty"><span>等待玩家加入</span><b>空位</b></div>'
+      : '<div class="player-row"><span>房主</span><b>0 分</b></div>'
+  byId.roomPlayerList.innerHTML = `
+    <div class="player-row is-you"><span>${escapeHtml(localRoom.nickname)}</span><b>${localRoom.role}</b></div>
+    ${waitingRow}
+  `
+}
+
+function createLocalRoom() {
+  localRoom = {
+    code: generateRoomCode(),
+    nickname: currentNickname(),
+    role: '房主',
+  }
+  byId.roomCodeInput.value = localRoom.code
+  renderRoom()
+}
+
+function joinLocalRoom() {
+  const code = normalizeRoomCode(byId.roomCodeInput.value)
+  if (code.length < 4) {
+    localRoom = null
+    renderRoom()
+    byId.roomMessage.textContent = '请输入至少 4 位房间码。'
+    return
+  }
+  byId.roomCodeInput.value = code
+  localRoom = {
+    code,
+    nickname: currentNickname(),
+    role: '玩家',
+  }
+  renderRoom()
+}
+
+function leaveLocalRoom() {
+  localRoom = null
+  renderRoom()
 }
 
 function card(side: Side) {
@@ -403,6 +608,8 @@ function render() {
   renderCard('left', left)
   renderCard('right', right)
   renderStats()
+  renderAppView()
+  renderRoom()
 }
 
 function startTimer() {
@@ -594,6 +801,8 @@ function applyPreset(name: PresetName) {
 function bindEvents() {
   card('left').root.addEventListener('click', () => select('left'))
   card('right').root.addEventListener('click', () => select('right'))
+  byId.viewSolo.addEventListener('click', () => switchView('solo'))
+  byId.viewMultiplayer.addEventListener('click', () => switchView('multiplayer'))
   byId.restart.addEventListener('click', restartGame)
   byId.dialogRestart.addEventListener('click', restartGame)
   byId.timedReadyDialog.addEventListener('cancel', (event) => event.preventDefault())
@@ -617,6 +826,17 @@ function bindEvents() {
     byId.copyResult.textContent = '已复制'
     window.setTimeout(() => (byId.copyResult.textContent = '复制战绩'), 1200)
   })
+  byId.roomCodeInput.addEventListener('input', () => {
+    byId.roomCodeInput.value = normalizeRoomCode(byId.roomCodeInput.value)
+  })
+  byId.playerName.addEventListener('input', () => {
+    if (!localRoom) return
+    localRoom.nickname = currentNickname()
+    renderRoom()
+  })
+  byId.createRoom.addEventListener('click', createLocalRoom)
+  byId.joinRoom.addEventListener('click', joinLocalRoom)
+  byId.leaveRoom.addEventListener('click', leaveLocalRoom)
   ;[
     byId.minVotes,
     byId.scoreMin,
