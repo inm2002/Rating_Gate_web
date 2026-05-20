@@ -2,6 +2,7 @@ import './style.css'
 
 type Mode = 'classic' | 'timed'
 type Phase = 'loading' | 'ready' | 'playing' | 'reveal' | 'ended'
+type PresetName = 'standard' | 'akashi' | 'brahmin'
 type Side = 'left' | 'right'
 type RankingFilter = 'all' | 'top500' | 'top2000' | 'middle' | 'deep'
 type ExcludeKey = 'guochan' | 'movies' | 'ova' | 'pamen' | 'oumei' | 'short' | 'recap'
@@ -68,6 +69,7 @@ let timerId = 0
 let revealId = 0
 let stats: Stats = { total: 0, correct: 0, streak: 0, bestStreak: 0 }
 let diffBuckets = [0, 0, 0, 0]
+let activePreset: PresetName | null = 'standard'
 let settings: Settings = {
   minVotes: 100,
   scoreMin: 0,
@@ -107,13 +109,16 @@ app.innerHTML = `
         <div class="stage-head">
           <div>
             <p class="prompt" id="prompt">数据加载中...</p>
-            <span class="round-note" id="round-note">选择评分更高的一侧</span>
+            <span class="round-note" id="round-note">胜者进入下一轮，左侧会显示上一轮胜者的评分。</span>
           </div>
           <button class="ghost-button" id="restart" type="button">重新开始</button>
         </div>
         <div class="arena">
           <button class="anime-card" id="card-left" type="button" aria-label="选择左侧动画">
-            <span class="poster-wrap"><img id="image-left" alt="" /></span>
+            <span class="poster-wrap" id="poster-left" data-loading="true">
+              <span class="poster-fallback" id="poster-fallback-left">封面加载中</span>
+              <img id="image-left" alt="" />
+            </span>
             <span class="card-copy">
               <span class="card-meta" id="meta-left"></span>
               <strong id="title-left"></strong>
@@ -123,7 +128,10 @@ app.innerHTML = `
           </button>
           <div class="versus" aria-hidden="true">VS</div>
           <button class="anime-card" id="card-right" type="button" aria-label="选择右侧动画">
-            <span class="poster-wrap"><img id="image-right" alt="" /></span>
+            <span class="poster-wrap" id="poster-right" data-loading="true">
+              <span class="poster-fallback" id="poster-fallback-right">封面加载中</span>
+              <img id="image-right" alt="" />
+            </span>
             <span class="card-copy">
               <span class="card-meta" id="meta-right"></span>
               <strong id="title-right"></strong>
@@ -266,6 +274,7 @@ const byId = {
   timedBackClassic: $('timed-back-classic') as HTMLButtonElement,
   timedStart: $('timed-start') as HTMLButtonElement,
   dataUpdated: $('data-updated'),
+  presetButtons: [...document.querySelectorAll<HTMLButtonElement>('[data-preset]')],
   metricLives: $('metric-lives'),
   metricStreak: $('metric-streak'),
   metricTotal: $('metric-total'),
@@ -393,6 +402,8 @@ function setPrompt(text: string, tone: 'neutral' | 'good' | 'bad' = 'neutral') {
 function card(side: Side) {
   return {
     root: $(`card-${side}`) as HTMLButtonElement,
+    poster: $(`poster-${side}`),
+    fallback: $(`poster-fallback-${side}`),
     image: $(`image-${side}`) as HTMLImageElement,
     title: $(`title-${side}`),
     meta: $(`meta-${side}`),
@@ -401,22 +412,48 @@ function card(side: Side) {
   }
 }
 
+function fallbackText(anime: Anime) {
+  return titleOf(anime).trim().slice(0, 2) || '封面'
+}
+
 function renderCard(side: Side, anime: Anime | null) {
   const view = card(side)
   view.root.className = 'anime-card'
   view.chip.className = 'result-chip'
   view.chip.textContent = ''
+  view.poster.dataset.loading = 'false'
+  view.poster.dataset.failed = 'false'
+  view.fallback.textContent = '封面加载中'
   if (!anime) {
     view.root.disabled = true
     view.title.textContent = '暂无题目'
     view.meta.textContent = '请调整筛选条件'
     view.score.textContent = '-'
+    view.fallback.textContent = '暂无封面'
+    view.image.removeAttribute('data-anime-id')
     view.image.removeAttribute('src')
     return
   }
   const shouldReveal = phase === 'reveal' || (side === 'left' && !firstRound)
   view.root.disabled = phase !== 'playing'
-  view.image.src = anime.image
+  view.poster.dataset.loading = 'true'
+  view.image.dataset.animeId = String(anime.id)
+  view.fallback.textContent = fallbackText(anime)
+  view.image.onload = () => {
+    if (view.image.dataset.animeId === String(anime.id)) view.poster.dataset.loading = 'false'
+  }
+  view.image.onerror = () => {
+    if (view.image.dataset.animeId === String(anime.id)) {
+      view.poster.dataset.loading = 'false'
+      view.poster.dataset.failed = 'true'
+      view.image.removeAttribute('src')
+    }
+  }
+  if (view.image.src !== anime.image) {
+    view.image.src = anime.image
+  } else if (view.image.complete && view.image.naturalWidth > 0) {
+    view.poster.dataset.loading = 'false'
+  }
   view.image.alt = `${titleOf(anime)} 封面`
   view.title.textContent = titleOf(anime)
   view.meta.textContent = `${yearOf(anime) || '未知'} · ${anime.platform || '动画'} · ${anime.votes.toLocaleString()} votes`
@@ -448,8 +485,12 @@ function renderStats() {
   byId.metricBest.textContent = String(Math.max(getBest(mode), stats.correct))
   byId.modeClassic.setAttribute('aria-pressed', mode === 'classic' ? 'true' : 'false')
   byId.modeTimed.setAttribute('aria-pressed', mode === 'timed' ? 'true' : 'false')
-  byId.roundNote.textContent = mode === 'timed' ? '90 秒冲分' : '5 次机会'
+  byId.roundNote.textContent = '胜者进入下一轮，左侧会显示上一轮胜者的评分。'
   byId.dataUpdated.textContent = dataUpdatedAt ? `数据更新时间 ${dataUpdatedAt}` : '数据更新时间 --'
+  byId.presetButtons.forEach((button) => {
+    const pressed = activePreset === button.dataset.preset
+    button.setAttribute('aria-pressed', pressed ? 'true' : 'false')
+  })
 }
 
 function render() {
@@ -643,9 +684,39 @@ function syncSettings() {
   byId.scoreMin.value = settings.scoreMin.toFixed(1).replace('.0', '')
   byId.scoreMax.value = settings.scoreMax.toFixed(1).replace('.0', '')
   byId.minVotesLabel.textContent = String(settings.minVotes)
+  activePreset = detectPreset()
 }
 
-function applyPreset(name: string) {
+function hasPresetExcludes() {
+  return (Object.keys(byId.excludes) as ExcludeKey[]).every(
+    (key) => byId.excludes[key].checked === presetExcludeDefaults.includes(key),
+  )
+}
+
+function detectPreset(): PresetName | null {
+  const year = new Date().getFullYear()
+  if (!hasPresetExcludes()) return null
+  const base =
+    byId.minVotes.value === '100' &&
+    byId.scoreMin.value === '0' &&
+    byId.yearMin.value === '1900' &&
+    byId.ranking.value === 'all'
+  if (base && byId.scoreMax.value === '10' && byId.yearMax.value === String(year)) return 'standard'
+  if (base && byId.scoreMax.value === '4.9' && byId.yearMax.value === String(year)) return 'akashi'
+  if (
+    byId.minVotes.value === '100' &&
+    byId.scoreMin.value === '0' &&
+    byId.scoreMax.value === '10' &&
+    byId.yearMin.value === '1900' &&
+    byId.yearMax.value === '2009' &&
+    byId.ranking.value === 'deep'
+  ) {
+    return 'brahmin'
+  }
+  return null
+}
+
+function applyPreset(name: PresetName) {
   const year = new Date().getFullYear()
   Object.values(byId.excludes).forEach((input) => {
     input.checked = false
@@ -718,10 +789,13 @@ function bindEvents() {
       syncSettings()
       restartGame()
     })
-    control.addEventListener('input', syncSettings)
+    control.addEventListener('input', () => {
+      syncSettings()
+      renderStats()
+    })
   })
-  document.querySelectorAll<HTMLButtonElement>('[data-preset]').forEach((button) => {
-    button.addEventListener('click', () => applyPreset(button.dataset.preset ?? 'balanced'))
+  byId.presetButtons.forEach((button) => {
+    button.addEventListener('click', () => applyPreset((button.dataset.preset ?? 'standard') as PresetName))
   })
   window.addEventListener('keydown', (event) => {
     if (event.key === '1') select('left')
