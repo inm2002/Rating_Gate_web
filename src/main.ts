@@ -51,6 +51,7 @@ let seen = new Set<number>()
 let appView: AppView = 'solo'
 let localRoom: LocalRoom | null = null
 let mode: Mode = 'classic'
+let roomMode: Mode = 'classic'
 let phase: Phase = 'loading'
 let left: Anime | null = null
 let right: Anime | null = null
@@ -65,7 +66,9 @@ let revealId = 0
 let stats: Stats = { total: 0, correct: 0, streak: 0, bestStreak: 0 }
 let diffBuckets = [0, 0, 0, 0]
 let activePreset: PresetName | null = 'standard'
+let activeRoomPreset: PresetName | null = 'standard'
 let settings: Settings = createDefaultSettings()
+let roomSettings: Settings = createDefaultSettings()
 
 app.innerHTML = `
   <main class="shell">
@@ -234,9 +237,17 @@ app.innerHTML = `
         <div class="room-heading">
           <div>
             <p class="eyebrow" id="room-role">房主</p>
-            <h2>房间 <span id="room-code">------</span></h2>
+            <h2>房间大厅</h2>
           </div>
           <span class="room-state" id="room-status">等待玩家</span>
+        </div>
+
+        <div class="room-code-bar">
+          <label class="control-field">
+            <span>房间码</span>
+            <input id="room-code-display" type="text" value="------" readonly />
+          </label>
+          <button class="ghost-button" id="copy-room-code" type="button">复制</button>
         </div>
 
         <div class="lobby-grid">
@@ -251,12 +262,75 @@ app.innerHTML = `
           <section class="lobby-panel">
             <div class="panel-title compact-title">
               <h3>比赛设置</h3>
-              <span>10 题</span>
+              <span id="room-mode-label">经典</span>
             </div>
+            <div class="room-mode-switch" aria-label="房间比赛模式">
+              <button id="room-mode-classic" type="button" aria-pressed="true">经典同步</button>
+              <button id="room-mode-timed" type="button" aria-pressed="false">限时冲分</button>
+            </div>
+            <p class="room-mode-note" id="room-mode-note">经典模式：全员同题作答，等待所有人完成后进入下一题。</p>
+
+            <div class="room-preset-row" aria-label="房间筛选预设">
+              <button type="button" data-room-preset="standard">标准</button>
+              <button type="button" data-room-preset="akashi">赤石大王</button>
+              <button type="button" data-room-preset="brahmin">婆罗门</button>
+            </div>
+
+            <label class="control-field">
+              <span>最低投票</span>
+              <input id="room-min-votes" type="range" min="100" max="5000" step="100" value="100" />
+              <output id="room-min-votes-label">100</output>
+            </label>
+
+            <div class="range-row">
+              <label class="control-field">
+                <span>最低评分</span>
+                <input id="room-score-min" type="number" min="0" max="10" step="0.1" value="0" />
+              </label>
+              <label class="control-field">
+                <span>最高评分</span>
+                <input id="room-score-max" type="number" min="0" max="10" step="0.1" value="10" />
+              </label>
+            </div>
+
+            <div class="range-row">
+              <label class="control-field">
+                <span>起始年份</span>
+                <input id="room-year-min" type="number" min="1900" max="2030" value="1900" />
+              </label>
+              <label class="control-field">
+                <span>结束年份</span>
+                <input id="room-year-max" type="number" min="1900" max="2030" value="${new Date().getFullYear()}" />
+              </label>
+            </div>
+
+            <label class="control-field">
+              <span>排名范围</span>
+              <select id="room-ranking">
+                <option value="all">全部排名</option>
+                <option value="top500">Top 500</option>
+                <option value="top2000">Top 2000</option>
+                <option value="middle">中游混战</option>
+                <option value="deep">冷门区间</option>
+              </select>
+            </label>
+
+            <fieldset class="exclude-set">
+              <legend>排除</legend>
+              <div class="toggle-grid">
+                <label><input id="room-exclude-guochan" type="checkbox" checked /><span>国产</span></label>
+                <label><input id="room-exclude-movies" type="checkbox" checked /><span>剧场版</span></label>
+                <label><input id="room-exclude-ova" type="checkbox" /><span>OVA</span></label>
+                <label><input id="room-exclude-pamen" type="checkbox" /><span>泡面番</span></label>
+                <label><input id="room-exclude-oumei" type="checkbox" checked /><span>欧美</span></label>
+                <label><input id="room-exclude-short" type="checkbox" /><span>短片</span></label>
+                <label><input id="room-exclude-recap" type="checkbox" checked /><span>总集篇</span></label>
+              </div>
+            </fieldset>
+
             <dl class="room-settings">
-              <div><dt>题库</dt><dd id="room-pool">-- 部</dd></div>
-              <div><dt>作答</dt><dd>15 秒/题</dd></div>
-              <div><dt>计分</dt><dd>答对 +1，连击加权待定</dd></div>
+              <div><dt>可用题库</dt><dd id="room-pool">-- 部</dd></div>
+              <div><dt>比赛长度</dt><dd id="room-length">10 题</dd></div>
             </dl>
           </section>
         </div>
@@ -265,6 +339,15 @@ app.innerHTML = `
           <button class="primary-button" id="room-start" type="button" disabled>开始比赛</button>
           <button class="ghost-button" id="leave-room" type="button">离开房间</button>
         </div>
+      </div>
+
+      <div class="room-card room-guide">
+        <p class="eyebrow">房间流程</p>
+        <ol>
+          <li><span>1</span><b>房主创建房间并复制房间码</b></li>
+          <li><span>2</span><b>玩家用房间码加入同一大厅</b></li>
+          <li><span>3</span><b>房主确认设置后统一开始比赛</b></li>
+        </ol>
       </div>
     </section>
 
@@ -350,13 +433,36 @@ const byId = {
   roomMessage: $('room-message'),
   roomLobby: $('room-lobby'),
   roomRole: $('room-role'),
-  roomCode: $('room-code'),
+  roomCodeDisplay: $('room-code-display') as HTMLInputElement,
+  copyRoomCode: $('copy-room-code') as HTMLButtonElement,
   roomStatus: $('room-status'),
+  roomModeLabel: $('room-mode-label'),
+  roomModeClassic: $('room-mode-classic') as HTMLButtonElement,
+  roomModeTimed: $('room-mode-timed') as HTMLButtonElement,
+  roomModeNote: $('room-mode-note'),
+  roomPresetButtons: [...document.querySelectorAll<HTMLButtonElement>('[data-room-preset]')],
+  roomMinVotes: $('room-min-votes') as HTMLInputElement,
+  roomMinVotesLabel: $('room-min-votes-label') as HTMLOutputElement,
+  roomScoreMin: $('room-score-min') as HTMLInputElement,
+  roomScoreMax: $('room-score-max') as HTMLInputElement,
+  roomYearMin: $('room-year-min') as HTMLInputElement,
+  roomYearMax: $('room-year-max') as HTMLInputElement,
+  roomRanking: $('room-ranking') as HTMLSelectElement,
   roomPool: $('room-pool'),
+  roomLength: $('room-length'),
   roomPlayerCount: $('room-player-count'),
   roomPlayerList: $('room-player-list'),
   roomStart: $('room-start') as HTMLButtonElement,
   leaveRoom: $('leave-room') as HTMLButtonElement,
+  roomExcludes: {
+    guochan: $('room-exclude-guochan') as HTMLInputElement,
+    movies: $('room-exclude-movies') as HTMLInputElement,
+    ova: $('room-exclude-ova') as HTMLInputElement,
+    pamen: $('room-exclude-pamen') as HTMLInputElement,
+    oumei: $('room-exclude-oumei') as HTMLInputElement,
+    short: $('room-exclude-short') as HTMLInputElement,
+    recap: $('room-exclude-recap') as HTMLInputElement,
+  } satisfies Record<ExcludeKey, HTMLInputElement>,
   excludes: {
     guochan: $('exclude-guochan') as HTMLInputElement,
     movies: $('exclude-movies') as HTMLInputElement,
@@ -398,7 +504,7 @@ function formatUpdatedAt(value: string) {
 function applyFilters() {
   pool = filterAnime(allAnime, settings)
   byId.poolCount.textContent = `${pool.length} 部`
-  byId.roomPool.textContent = `${pool.length} 部`
+  renderRoomSettings()
 }
 
 function setPrompt(text: string, tone: 'neutral' | 'good' | 'bad' = 'neutral') {
@@ -457,12 +563,15 @@ function currentNickname() {
 
 function renderRoom() {
   byId.roomLobby.hidden = !localRoom
-  byId.roomPool.textContent = `${pool.length} 部`
+  renderRoomSettings()
+  byId.roomCodeInput.readOnly = !!localRoom
   if (!localRoom) {
+    byId.roomCodeInput.readOnly = false
+    byId.roomCodeDisplay.value = '------'
     byId.roomMessage.textContent = '房间界面已就绪，下一步接入本地 WebSocket 服务。'
     return
   }
-  byId.roomCode.textContent = localRoom.code
+  byId.roomCodeDisplay.value = localRoom.code
   byId.roomRole.textContent = localRoom.role
   byId.roomStatus.textContent = localRoom.role === '房主' ? '等待玩家' : '已加入'
   byId.roomMessage.textContent =
@@ -476,6 +585,85 @@ function renderRoom() {
     <div class="player-row is-you"><span>${escapeHtml(localRoom.nickname)}</span><b>${localRoom.role}</b></div>
     ${waitingRow}
   `
+}
+
+function setRoomControlsFromSettings(nextSettings: Settings) {
+  byId.roomMinVotes.value = String(nextSettings.minVotes)
+  byId.roomScoreMin.value = String(nextSettings.scoreMin)
+  byId.roomScoreMax.value = String(nextSettings.scoreMax)
+  byId.roomYearMin.value = String(nextSettings.yearMin)
+  byId.roomYearMax.value = String(nextSettings.yearMax)
+  byId.roomRanking.value = nextSettings.ranking
+  ;(Object.keys(byId.roomExcludes) as ExcludeKey[]).forEach((key) => {
+    byId.roomExcludes[key].checked = nextSettings.excludes[key]
+  })
+}
+
+function syncRoomSettings() {
+  const scoreMin = Number.parseFloat(byId.roomScoreMin.value)
+  const scoreMax = Number.parseFloat(byId.roomScoreMax.value)
+  roomSettings = {
+    minVotes: Number.parseInt(byId.roomMinVotes.value, 10),
+    scoreMin: Number.isFinite(scoreMin) ? Math.max(0, Math.min(10, scoreMin)) : 0,
+    scoreMax: Number.isFinite(scoreMax) ? Math.max(0, Math.min(10, scoreMax)) : 10,
+    yearMin: Number.parseInt(byId.roomYearMin.value, 10),
+    yearMax: Number.parseInt(byId.roomYearMax.value, 10),
+    ranking: byId.roomRanking.value as RankingFilter,
+    excludes: {
+      guochan: byId.roomExcludes.guochan.checked,
+      movies: byId.roomExcludes.movies.checked,
+      ova: byId.roomExcludes.ova.checked,
+      pamen: byId.roomExcludes.pamen.checked,
+      oumei: byId.roomExcludes.oumei.checked,
+      short: byId.roomExcludes.short.checked,
+      recap: byId.roomExcludes.recap.checked,
+    },
+  }
+  if (roomSettings.scoreMin > roomSettings.scoreMax) {
+    ;[roomSettings.scoreMin, roomSettings.scoreMax] = [roomSettings.scoreMax, roomSettings.scoreMin]
+  }
+  byId.roomScoreMin.value = roomSettings.scoreMin.toFixed(1).replace('.0', '')
+  byId.roomScoreMax.value = roomSettings.scoreMax.toFixed(1).replace('.0', '')
+  byId.roomMinVotesLabel.textContent = String(roomSettings.minVotes)
+  activeRoomPreset = detectPreset(roomSettings)
+  renderRoomSettings()
+}
+
+function renderRoomSettings() {
+  const roomPool = filterAnime(allAnime, roomSettings)
+  byId.roomPool.textContent = `${roomPool.length} 部`
+  byId.roomModeLabel.textContent = roomMode === 'classic' ? '经典同步' : '限时冲分'
+  byId.roomLength.textContent = roomMode === 'classic' ? '10 题' : '90 秒'
+  byId.roomModeClassic.setAttribute('aria-pressed', roomMode === 'classic' ? 'true' : 'false')
+  byId.roomModeTimed.setAttribute('aria-pressed', roomMode === 'timed' ? 'true' : 'false')
+  byId.roomModeNote.textContent =
+    roomMode === 'classic'
+      ? '经典模式：全员同题作答，等待所有人完成后进入下一题。'
+      : '计时模式：玩家各自连续答题，只同步总时间，时间结束后统一结算。'
+  byId.roomPresetButtons.forEach((button) => {
+    button.setAttribute('aria-pressed', activeRoomPreset === button.dataset.roomPreset ? 'true' : 'false')
+  })
+  const canEdit = !localRoom || localRoom.role === '房主'
+  ;[
+    byId.roomModeClassic,
+    byId.roomModeTimed,
+    byId.roomMinVotes,
+    byId.roomScoreMin,
+    byId.roomScoreMax,
+    byId.roomYearMin,
+    byId.roomYearMax,
+    byId.roomRanking,
+    ...byId.roomPresetButtons,
+    ...Object.values(byId.roomExcludes),
+  ].forEach((control) => {
+    control.disabled = !canEdit
+  })
+}
+
+function applyRoomPreset(name: PresetName) {
+  roomSettings = applyPresetSettings(name)
+  setRoomControlsFromSettings(roomSettings)
+  syncRoomSettings()
 }
 
 function createLocalRoom() {
@@ -508,6 +696,15 @@ function joinLocalRoom() {
 function leaveLocalRoom() {
   localRoom = null
   renderRoom()
+}
+
+async function copyRoomCode() {
+  if (!localRoom) return
+  byId.roomCodeDisplay.select()
+  byId.roomCodeDisplay.setSelectionRange(0, localRoom.code.length)
+  await navigator.clipboard.writeText(localRoom.code)
+  byId.copyRoomCode.textContent = '已复制'
+  window.setTimeout(() => (byId.copyRoomCode.textContent = '复制'), 1200)
 }
 
 function card(side: Side) {
@@ -837,6 +1034,30 @@ function bindEvents() {
   byId.createRoom.addEventListener('click', createLocalRoom)
   byId.joinRoom.addEventListener('click', joinLocalRoom)
   byId.leaveRoom.addEventListener('click', leaveLocalRoom)
+  byId.copyRoomCode.addEventListener('click', copyRoomCode)
+  byId.roomModeClassic.addEventListener('click', () => {
+    roomMode = 'classic'
+    renderRoomSettings()
+  })
+  byId.roomModeTimed.addEventListener('click', () => {
+    roomMode = 'timed'
+    renderRoomSettings()
+  })
+  ;[
+    byId.roomMinVotes,
+    byId.roomScoreMin,
+    byId.roomScoreMax,
+    byId.roomYearMin,
+    byId.roomYearMax,
+    byId.roomRanking,
+    ...Object.values(byId.roomExcludes),
+  ].forEach((control) => {
+    control.addEventListener('change', syncRoomSettings)
+    control.addEventListener('input', syncRoomSettings)
+  })
+  byId.roomPresetButtons.forEach((button) => {
+    button.addEventListener('click', () => applyRoomPreset((button.dataset.roomPreset ?? 'standard') as PresetName))
+  })
   ;[
     byId.minVotes,
     byId.scoreMin,
@@ -877,6 +1098,7 @@ async function boot() {
       dataUpdatedAt = formatUpdatedAt(response.headers.get('last-modified') ?? '')
     }
     syncSettings()
+    syncRoomSettings()
     restartGame()
   } catch (error) {
     console.error(error)
