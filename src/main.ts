@@ -28,6 +28,8 @@ interface Stats {
 
 interface Settings {
   minVotes: number
+  scoreMin: number
+  scoreMax: number
   yearMin: number
   yearMax: number
   ranking: RankingFilter
@@ -59,18 +61,20 @@ let revealId = 0
 let stats: Stats = { total: 0, correct: 0, streak: 0, bestStreak: 0 }
 let diffBuckets = [0, 0, 0, 0]
 let settings: Settings = {
-  minVotes: 500,
-  yearMin: 1990,
+  minVotes: 100,
+  scoreMin: 0,
+  scoreMax: 10,
+  yearMin: 1900,
   yearMax: new Date().getFullYear(),
   ranking: 'all',
   excludes: {
-    guochan: true,
-    movies: true,
-    ova: true,
-    pamen: true,
-    oumei: true,
-    short: true,
-    recap: true,
+    guochan: false,
+    movies: false,
+    ova: false,
+    pamen: false,
+    oumei: false,
+    short: false,
+    recap: false,
   },
 }
 
@@ -78,9 +82,9 @@ app.innerHTML = `
   <main class="shell">
     <header class="site-header">
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true">AS</span>
+        <span class="brand-mark" aria-hidden="true">鉴</span>
         <div>
-          <h1>AniScore Arena</h1>
+          <h1>目标是番组鉴分王</h1>
           <p>Bangumi 评分挑战</p>
         </div>
       </div>
@@ -137,25 +141,36 @@ app.innerHTML = `
           </div>
 
           <div class="preset-row" aria-label="筛选预设">
-            <button type="button" data-preset="balanced">标准</button>
-            <button type="button" data-preset="recent">近年</button>
-            <button type="button" data-preset="hard">高手</button>
+            <button type="button" data-preset="standard">标准</button>
+            <button type="button" data-preset="akashi">赤石大王</button>
+            <button type="button" data-preset="brahmin">婆罗门</button>
           </div>
 
           <label class="control-field">
             <span>最低投票</span>
-            <input id="min-votes" type="range" min="100" max="5000" step="100" value="500" />
-            <output id="min-votes-label">500</output>
+            <input id="min-votes" type="range" min="100" max="5000" step="100" value="100" />
+            <output id="min-votes-label">100</output>
           </label>
 
           <div class="range-row">
             <label class="control-field">
+              <span>最低评分</span>
+              <input id="score-min" type="number" min="0" max="10" step="0.1" value="0" />
+            </label>
+            <label class="control-field">
+              <span>最高评分</span>
+              <input id="score-max" type="number" min="0" max="10" step="0.1" value="10" />
+            </label>
+          </div>
+
+          <div class="range-row">
+            <label class="control-field">
               <span>起始年份</span>
-              <input id="year-min" type="number" min="1960" max="2030" value="1990" />
+              <input id="year-min" type="number" min="1900" max="2030" value="1900" />
             </label>
             <label class="control-field">
               <span>结束年份</span>
-              <input id="year-max" type="number" min="1960" max="2030" value="${new Date().getFullYear()}" />
+              <input id="year-max" type="number" min="1900" max="2030" value="${new Date().getFullYear()}" />
             </label>
           </div>
 
@@ -173,18 +188,23 @@ app.innerHTML = `
           <fieldset class="exclude-set">
             <legend>排除</legend>
             <div class="toggle-grid">
-              <label><input id="exclude-guochan" type="checkbox" checked /><span>国产</span></label>
-              <label><input id="exclude-movies" type="checkbox" checked /><span>剧场版</span></label>
-              <label><input id="exclude-ova" type="checkbox" checked /><span>OVA</span></label>
-              <label><input id="exclude-pamen" type="checkbox" checked /><span>泡面番</span></label>
-              <label><input id="exclude-oumei" type="checkbox" checked /><span>欧美</span></label>
-              <label><input id="exclude-short" type="checkbox" checked /><span>短片</span></label>
-              <label><input id="exclude-recap" type="checkbox" checked /><span>总集篇</span></label>
+              <label><input id="exclude-guochan" type="checkbox" /><span>国产</span></label>
+              <label><input id="exclude-movies" type="checkbox" /><span>剧场版</span></label>
+              <label><input id="exclude-ova" type="checkbox" /><span>OVA</span></label>
+              <label><input id="exclude-pamen" type="checkbox" /><span>泡面番</span></label>
+              <label><input id="exclude-oumei" type="checkbox" /><span>欧美</span></label>
+              <label><input id="exclude-short" type="checkbox" /><span>短片</span></label>
+              <label><input id="exclude-recap" type="checkbox" /><span>总集篇</span></label>
             </div>
           </fieldset>
         </section>
       </aside>
     </div>
+
+    <footer class="site-footer">
+      <span>数据来源 <a href="https://bangumi.tv/" target="_blank" rel="noopener">Bangumi</a></span>
+      <span>参考来源 <a href="https://bangumi-master.logicry.cc/" target="_blank" rel="noopener">目标是Bangumi大师</a></span>
+    </footer>
   </main>
 
   <dialog id="result-dialog" class="result-dialog">
@@ -228,6 +248,8 @@ const byId = {
   poolCount: $('pool-count'),
   minVotes: $('min-votes') as HTMLInputElement,
   minVotesLabel: $('min-votes-label') as HTMLOutputElement,
+  scoreMin: $('score-min') as HTMLInputElement,
+  scoreMax: $('score-max') as HTMLInputElement,
   yearMin: $('year-min') as HTMLInputElement,
   yearMax: $('year-max') as HTMLInputElement,
   ranking: $('ranking') as HTMLSelectElement,
@@ -295,6 +317,7 @@ function applyFilters() {
     const year = yearOf(anime)
     const inYear = year === 0 || (year >= settings.yearMin && year <= settings.yearMax)
     if (anime.votes < settings.minVotes || !inYear) return false
+    if (anime.score < settings.scoreMin || anime.score > settings.scoreMax) return false
     if (isExcluded(anime)) return false
     if (settings.ranking === 'top500') return anime.rank !== null && anime.rank <= 500
     if (settings.ranking === 'top2000') return anime.rank !== null && anime.rank <= 2000
@@ -311,10 +334,12 @@ function randomAnime() {
 }
 
 function pickNext(anchor: Anime) {
-  let candidates = pool.filter((anime) => anime.id !== anchor.id && !seen.has(anime.id))
+  let candidates = pool.filter(
+    (anime) => anime.id !== anchor.id && anime.score !== anchor.score && !seen.has(anime.id),
+  )
   if (candidates.length < 2) {
     seen = new Set([anchor.id])
-    candidates = pool.filter((anime) => anime.id !== anchor.id)
+    candidates = pool.filter((anime) => anime.id !== anchor.id && anime.score !== anchor.score)
   }
   const close = candidates.filter((anime) => Math.abs(anime.score - anchor.score) <= 0.45)
   const medium = candidates.filter((anime) => Math.abs(anime.score - anchor.score) <= 0.9)
@@ -341,6 +366,7 @@ function card(side: Side) {
 function renderCard(side: Side, anime: Anime | null) {
   const view = card(side)
   view.root.className = 'anime-card'
+  view.chip.className = 'result-chip'
   view.chip.textContent = ''
   if (!anime) {
     view.root.disabled = true
@@ -360,12 +386,19 @@ function renderCard(side: Side, anime: Anime | null) {
   view.score.classList.toggle('hidden-score', !shouldReveal)
 
   if (phase === 'reveal') {
+    const selectedCorrect = selectedSide === side && (winningSide === side || isTie)
     if (selectedSide === side) view.root.classList.add('is-selected')
+    if (selectedCorrect) view.root.classList.add('is-correct')
     if (winningSide === side || isTie) view.root.classList.add('is-winner')
     if (selectedSide === side && winningSide !== side && !isTie) view.root.classList.add('is-wrong')
-    if (selectedSide === side) view.chip.textContent = winningSide === side || isTie ? '答对' : '答错'
-    else if (winningSide === side) view.chip.textContent = '更高'
-    else if (isTie) view.chip.textContent = '平分'
+    if (selectedSide === side) {
+      const correct = winningSide === side || isTie
+      view.chip.textContent = correct ? '✓ 正确' : '✕ 错误'
+      view.chip.classList.add(correct ? 'is-correct' : 'is-wrong')
+    } else if (winningSide === side) {
+      view.chip.textContent = '高分'
+      view.chip.classList.add('is-winner')
+    } else if (isTie) view.chip.textContent = '平分'
   }
 }
 
@@ -413,15 +446,24 @@ function restartGame() {
   selectedSide = null
   winningSide = null
   isTie = false
-  phase = pool.length >= 2 ? 'playing' : 'ended'
-  left = randomAnime()
-  if (left) {
-    seen.add(left.id)
-    right = pickNext(left)
-    if (right) seen.add(right.id)
+  const distinctScores = new Set(pool.map((anime) => anime.score))
+  phase = pool.length >= 2 && distinctScores.size >= 2 ? 'playing' : 'ended'
+  left = null
+  right = null
+  for (let attempt = 0; attempt < 30 && phase === 'playing'; attempt += 1) {
+    const candidate = randomAnime()
+    if (!candidate) break
+    seen = new Set([candidate.id])
+    const next = pickNext(candidate)
+    if (next) {
+      left = candidate
+      right = next
+      seen.add(next.id)
+      break
+    }
   }
   if (!left || !right) {
-    setPrompt('当前筛选下题目不足，请放宽条件。', 'bad')
+    setPrompt('当前筛选下题目不足，或评分都相同，请放宽条件。', 'bad')
   } else {
     setPrompt('哪部动画评分更高？')
     startTimer()
@@ -470,6 +512,7 @@ function select(side: Side) {
 function advanceRound() {
   if (!right) return
   left = right
+  seen.add(left.id)
   const next = pickNext(left)
   if (!next) {
     endGame('题库用完')
@@ -517,8 +560,12 @@ function endGame(reason: string) {
 }
 
 function syncSettings() {
+  const scoreMin = Number.parseFloat(byId.scoreMin.value)
+  const scoreMax = Number.parseFloat(byId.scoreMax.value)
   settings = {
     minVotes: Number.parseInt(byId.minVotes.value, 10),
+    scoreMin: Number.isFinite(scoreMin) ? Math.max(0, Math.min(10, scoreMin)) : 0,
+    scoreMax: Number.isFinite(scoreMax) ? Math.max(0, Math.min(10, scoreMax)) : 10,
     yearMin: Number.parseInt(byId.yearMin.value, 10),
     yearMax: Number.parseInt(byId.yearMax.value, 10),
     ranking: byId.ranking.value as RankingFilter,
@@ -532,24 +579,38 @@ function syncSettings() {
       recap: byId.excludes.recap.checked,
     },
   }
+  if (settings.scoreMin > settings.scoreMax) {
+    ;[settings.scoreMin, settings.scoreMax] = [settings.scoreMax, settings.scoreMin]
+  }
+  byId.scoreMin.value = settings.scoreMin.toFixed(1).replace('.0', '')
+  byId.scoreMax.value = settings.scoreMax.toFixed(1).replace('.0', '')
   byId.minVotesLabel.textContent = String(settings.minVotes)
 }
 
 function applyPreset(name: string) {
   const year = new Date().getFullYear()
-  if (name === 'recent') {
-    byId.minVotes.value = '300'
-    byId.yearMin.value = String(year - 10)
+  Object.values(byId.excludes).forEach((input) => {
+    input.checked = false
+  })
+  if (name === 'akashi') {
+    byId.minVotes.value = '100'
+    byId.scoreMin.value = '0'
+    byId.scoreMax.value = '4.9'
+    byId.yearMin.value = '1900'
     byId.yearMax.value = String(year)
     byId.ranking.value = 'all'
-  } else if (name === 'hard') {
-    byId.minVotes.value = '1200'
-    byId.yearMin.value = '1995'
-    byId.yearMax.value = String(year)
-    byId.ranking.value = 'top2000'
+  } else if (name === 'brahmin') {
+    byId.minVotes.value = '100'
+    byId.scoreMin.value = '0'
+    byId.scoreMax.value = '10'
+    byId.yearMin.value = '1900'
+    byId.yearMax.value = '2009'
+    byId.ranking.value = 'deep'
   } else {
-    byId.minVotes.value = '500'
-    byId.yearMin.value = '1990'
+    byId.minVotes.value = '100'
+    byId.scoreMin.value = '0'
+    byId.scoreMax.value = '10'
+    byId.yearMin.value = '1900'
     byId.yearMax.value = String(year)
     byId.ranking.value = 'all'
   }
@@ -571,13 +632,15 @@ function bindEvents() {
     restartGame()
   })
   byId.copyResult.addEventListener('click', async () => {
-    const text = `AniScore Arena：${mode === 'timed' ? '限时' : '经典'}模式答对 ${stats.correct}/${stats.total}，最高连击 ${stats.bestStreak}`
+    const text = `目标是番组鉴分王：${mode === 'timed' ? '限时' : '经典'}模式答对 ${stats.correct}/${stats.total}，最高连击 ${stats.bestStreak}`
     await navigator.clipboard.writeText(text)
     byId.copyResult.textContent = '已复制'
     window.setTimeout(() => (byId.copyResult.textContent = '复制战绩'), 1200)
   })
   ;[
     byId.minVotes,
+    byId.scoreMin,
+    byId.scoreMax,
     byId.yearMin,
     byId.yearMax,
     byId.ranking,

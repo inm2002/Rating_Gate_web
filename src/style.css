@@ -178,11 +178,19 @@ h1 {
 }
 
 .prompt[data-tone='good'] {
+  display: inline-flex;
+  border-radius: 8px;
+  background: rgba(22, 131, 94, 0.1);
   color: var(--good);
+  padding: 6px 10px;
 }
 
 .prompt[data-tone='bad'] {
+  display: inline-flex;
+  border-radius: 8px;
+  background: rgba(201, 68, 82, 0.1);
   color: var(--bad);
+  padding: 6px 10px;
 }
 
 .round-note {
@@ -289,11 +297,16 @@ h1 {
   box-shadow: 0 0 0 3px rgba(216, 95, 134, 0.16), 0 20px 54px rgba(27, 31, 42, 0.12);
 }
 
+.anime-card.is-correct {
+  background: linear-gradient(180deg, rgba(22, 131, 94, 0.07), #fff 42%);
+}
+
 .anime-card.is-winner {
   border-color: rgba(22, 131, 94, 0.78);
 }
 
 .anime-card.is-wrong {
+  background: linear-gradient(180deg, rgba(201, 68, 82, 0.08), #fff 42%);
   border-color: rgba(201, 68, 82, 0.78);
 }
 
@@ -376,6 +389,21 @@ h1 {
 
 .result-chip:empty {
   display: none;
+}
+
+.result-chip.is-correct {
+  background: var(--good);
+  color: #fff;
+}
+
+.result-chip.is-wrong {
+  background: var(--bad);
+  color: #fff;
+}
+
+.result-chip.is-winner {
+  background: #17181d;
+  color: #fff;
 }
 
 .side-panel {
@@ -637,6 +665,25 @@ h1 {
   gap: 10px;
 }
 
+.site-footer {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  margin-top: 24px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.site-footer a {
+  color: var(--accent-deep);
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.site-footer a:hover {
+  text-decoration: underline;
+}
+
 @media (max-width: 1080px) {
   .game-layout {
     grid-template-columns: 1fr;
@@ -755,5 +802,11 @@ h1 {
 
   .panel {
     padding: 16px;
+  }
+
+  .site-footer {
+    align-items: center;
+    flex-direction: column;
+    gap: 6px;
   }
 }

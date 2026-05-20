@@ -45,6 +45,16 @@ const queries = [
     filter: { type: [2], nsfw: false },
   },
   {
+    label: 'low score heat',
+    sort: 'heat',
+    filter: { type: [2], nsfw: false, rating: ['<5'] },
+  },
+  {
+    label: 'low score rank',
+    sort: 'rank',
+    filter: { type: [2], nsfw: false, rating: ['<5'] },
+  },
+  {
     label: 'recent high vote',
     sort: 'heat',
     filter: { type: [2], nsfw: false, date: ['>=2018-01-01'] },
