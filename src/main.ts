@@ -1,7 +1,7 @@
 import './style.css'
 
 type Mode = 'classic' | 'timed'
-type Phase = 'loading' | 'playing' | 'reveal' | 'ended'
+type Phase = 'loading' | 'ready' | 'playing' | 'reveal' | 'ended'
 type Side = 'left' | 'right'
 type RankingFilter = 'all' | 'top500' | 'top2000' | 'middle' | 'deep'
 type ExcludeKey = 'guochan' | 'movies' | 'ova' | 'pamen' | 'oumei' | 'short' | 'recap'
@@ -36,14 +36,22 @@ interface Settings {
   excludes: Record<ExcludeKey, boolean>
 }
 
+interface AnimeSeedMeta {
+  generatedAt: string
+  source: string
+  count: number
+}
+
 const MAX_LIVES = 5
 const TIME_LIMIT = 90
 const BEST_KEY = 'aniscore-arena-best-v1'
+const presetExcludeDefaults: ExcludeKey[] = ['guochan', 'movies', 'oumei', 'recap']
 
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('Missing #app')
 
 let allAnime: Anime[] = []
+let dataUpdatedAt = ''
 let pool: Anime[] = []
 let seen = new Set<number>()
 let mode: Mode = 'classic'
@@ -68,13 +76,13 @@ let settings: Settings = {
   yearMax: new Date().getFullYear(),
   ranking: 'all',
   excludes: {
-    guochan: false,
-    movies: false,
+    guochan: true,
+    movies: true,
     ova: false,
     pamen: false,
-    oumei: false,
+    oumei: true,
     short: false,
-    recap: false,
+    recap: true,
   },
 }
 
@@ -188,13 +196,13 @@ app.innerHTML = `
           <fieldset class="exclude-set">
             <legend>排除</legend>
             <div class="toggle-grid">
-              <label><input id="exclude-guochan" type="checkbox" /><span>国产</span></label>
-              <label><input id="exclude-movies" type="checkbox" /><span>剧场版</span></label>
+              <label><input id="exclude-guochan" type="checkbox" checked /><span>国产</span></label>
+              <label><input id="exclude-movies" type="checkbox" checked /><span>剧场版</span></label>
               <label><input id="exclude-ova" type="checkbox" /><span>OVA</span></label>
               <label><input id="exclude-pamen" type="checkbox" /><span>泡面番</span></label>
-              <label><input id="exclude-oumei" type="checkbox" /><span>欧美</span></label>
+              <label><input id="exclude-oumei" type="checkbox" checked /><span>欧美</span></label>
               <label><input id="exclude-short" type="checkbox" /><span>短片</span></label>
-              <label><input id="exclude-recap" type="checkbox" /><span>总集篇</span></label>
+              <label><input id="exclude-recap" type="checkbox" checked /><span>总集篇</span></label>
             </div>
           </fieldset>
         </section>
@@ -204,8 +212,21 @@ app.innerHTML = `
     <footer class="site-footer">
       <span>数据来源 <a href="https://bangumi.tv/" target="_blank" rel="noopener">Bangumi</a></span>
       <span>参考来源 <a href="https://bangumi-master.logicry.cc/" target="_blank" rel="noopener">目标是Bangumi大师</a></span>
+      <span id="data-updated">数据更新时间 --</span>
     </footer>
   </main>
+
+  <dialog id="timed-ready-dialog" class="result-dialog timed-ready-dialog">
+    <div class="result-box">
+      <p class="result-kicker">限时挑战</p>
+      <h2>准备好再开始</h2>
+      <p class="dialog-copy">点击开始后计时才会启动，90 秒内尽可能判断更多评分高低。</p>
+      <div class="dialog-actions">
+        <button class="ghost-button" id="timed-back-classic" type="button">回到经典</button>
+        <button class="primary-button" id="timed-start" type="button">开始计时</button>
+      </div>
+    </div>
+  </dialog>
 
   <dialog id="result-dialog" class="result-dialog">
     <div class="result-box">
@@ -241,6 +262,10 @@ const byId = {
   dialogRestart: $('dialog-restart') as HTMLButtonElement,
   copyResult: $('copy-result') as HTMLButtonElement,
   resultDialog: $('result-dialog') as HTMLDialogElement,
+  timedReadyDialog: $('timed-ready-dialog') as HTMLDialogElement,
+  timedBackClassic: $('timed-back-classic') as HTMLButtonElement,
+  timedStart: $('timed-start') as HTMLButtonElement,
+  dataUpdated: $('data-updated'),
   metricLives: $('metric-lives'),
   metricStreak: $('metric-streak'),
   metricTotal: $('metric-total'),
@@ -285,6 +310,19 @@ function titleOf(anime: Anime) {
 function yearOf(anime: Anime) {
   const year = Number.parseInt(anime.date.slice(0, 4), 10)
   return Number.isFinite(year) ? year : 0
+}
+
+function formatUpdatedAt(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
 }
 
 const excludeTerms: Record<ExcludeKey, string[]> = {
@@ -411,6 +449,7 @@ function renderStats() {
   byId.modeClassic.setAttribute('aria-pressed', mode === 'classic' ? 'true' : 'false')
   byId.modeTimed.setAttribute('aria-pressed', mode === 'timed' ? 'true' : 'false')
   byId.roundNote.textContent = mode === 'timed' ? '90 秒冲分' : '5 次机会'
+  byId.dataUpdated.textContent = dataUpdatedAt ? `数据更新时间 ${dataUpdatedAt}` : '数据更新时间 --'
 }
 
 function render() {
@@ -421,7 +460,7 @@ function render() {
 
 function startTimer() {
   window.clearInterval(timerId)
-  if (mode !== 'timed') return
+  if (mode !== 'timed' || phase !== 'playing') return
   timerId = window.setInterval(() => {
     timeLeft -= 1
     renderStats()
@@ -433,9 +472,24 @@ function stopTimer() {
   window.clearInterval(timerId)
 }
 
+function showTimedReadyDialog() {
+  if (!byId.timedReadyDialog.open) byId.timedReadyDialog.showModal()
+}
+
+function startTimedRound() {
+  if (mode !== 'timed' || phase !== 'ready') return
+  phase = 'playing'
+  byId.timedReadyDialog.close()
+  setPrompt('哪部动画评分更高？')
+  startTimer()
+  render()
+}
+
 function restartGame() {
   stopTimer()
   window.clearTimeout(revealId)
+  if (byId.resultDialog.open) byId.resultDialog.close()
+  if (byId.timedReadyDialog.open) byId.timedReadyDialog.close()
   applyFilters()
   lives = MAX_LIVES
   timeLeft = TIME_LIMIT
@@ -465,10 +519,14 @@ function restartGame() {
   if (!left || !right) {
     setPrompt('当前筛选下题目不足，或评分都相同，请放宽条件。', 'bad')
   } else {
-    setPrompt('哪部动画评分更高？')
-    startTimer()
+    if (mode === 'timed') {
+      phase = 'ready'
+      setPrompt('准备好后开始限时挑战')
+      showTimedReadyDialog()
+    } else {
+      setPrompt('哪部动画评分更高？')
+    }
   }
-  byId.resultDialog.close()
   render()
 }
 
@@ -592,6 +650,9 @@ function applyPreset(name: string) {
   Object.values(byId.excludes).forEach((input) => {
     input.checked = false
   })
+  presetExcludeDefaults.forEach((key) => {
+    byId.excludes[key].checked = true
+  })
   if (name === 'akashi') {
     byId.minVotes.value = '100'
     byId.scoreMin.value = '0'
@@ -623,6 +684,13 @@ function bindEvents() {
   card('right').root.addEventListener('click', () => select('right'))
   byId.restart.addEventListener('click', restartGame)
   byId.dialogRestart.addEventListener('click', restartGame)
+  byId.timedReadyDialog.addEventListener('cancel', (event) => event.preventDefault())
+  byId.timedStart.addEventListener('click', startTimedRound)
+  byId.timedBackClassic.addEventListener('click', () => {
+    byId.timedReadyDialog.close()
+    mode = 'classic'
+    restartGame()
+  })
   byId.modeClassic.addEventListener('click', () => {
     mode = 'classic'
     restartGame()
@@ -664,9 +732,15 @@ function bindEvents() {
 async function boot() {
   bindEvents()
   try {
-    const response = await fetch('/anime-seed.json')
+    const [response, metaResponse] = await Promise.all([fetch('/anime-seed.json'), fetch('/anime-seed-meta.json')])
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     allAnime = (await response.json()) as Anime[]
+    if (metaResponse.ok) {
+      const meta = (await metaResponse.json()) as AnimeSeedMeta
+      dataUpdatedAt = formatUpdatedAt(meta.generatedAt)
+    } else {
+      dataUpdatedAt = formatUpdatedAt(response.headers.get('last-modified') ?? '')
+    }
     syncSettings()
     restartGame()
   } catch (error) {

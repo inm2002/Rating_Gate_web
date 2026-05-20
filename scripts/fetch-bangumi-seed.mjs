@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path'
 
 const endpoint = 'https://api.bgm.tv/v0/search/subjects'
 const outputPath = resolve('public/anime-seed.json')
+const metaOutputPath = resolve('public/anime-seed-meta.json')
 const pageSize = 20
 const sleepMs = 120
 const maxPagesPerQuery = 25
@@ -143,5 +144,18 @@ const seed = [...byId.values()]
 
 await mkdir(dirname(outputPath), { recursive: true })
 await writeFile(outputPath, `${JSON.stringify(seed, null, 2)}\n`, 'utf8')
+await writeFile(
+  metaOutputPath,
+  `${JSON.stringify(
+    {
+      generatedAt: new Date().toISOString(),
+      source: 'Bangumi API',
+      count: seed.length,
+    },
+    null,
+    2,
+  )}\n`,
+  'utf8',
+)
 
 console.log(`Wrote ${seed.length} anime to ${outputPath}`)
