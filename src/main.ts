@@ -3,6 +3,8 @@ import './style.css'
 type Mode = 'classic' | 'timed'
 type Phase = 'loading' | 'playing' | 'reveal' | 'ended'
 type Side = 'left' | 'right'
+type RankingFilter = 'all' | 'top500' | 'top2000' | 'middle' | 'deep'
+type ExcludeKey = 'guochan' | 'movies' | 'ova' | 'pamen' | 'oumei' | 'short' | 'recap'
 
 interface Anime {
   id: number
@@ -28,8 +30,8 @@ interface Settings {
   minVotes: number
   yearMin: number
   yearMax: number
-  ranking: 'all' | 'top' | 'mid'
-  hideMovies: boolean
+  ranking: RankingFilter
+  excludes: Record<ExcludeKey, boolean>
 }
 
 const MAX_LIVES = 5
@@ -57,106 +59,132 @@ let revealId = 0
 let stats: Stats = { total: 0, correct: 0, streak: 0, bestStreak: 0 }
 let diffBuckets = [0, 0, 0, 0]
 let settings: Settings = {
-  minVotes: 800,
-  yearMin: 1995,
+  minVotes: 500,
+  yearMin: 1990,
   yearMax: new Date().getFullYear(),
   ranking: 'all',
-  hideMovies: false,
+  excludes: {
+    guochan: true,
+    movies: true,
+    ova: true,
+    pamen: true,
+    oumei: true,
+    short: true,
+    recap: true,
+  },
 }
 
 app.innerHTML = `
   <main class="shell">
-    <header class="topbar">
+    <header class="site-header">
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true">A</span>
+        <span class="brand-mark" aria-hidden="true">AS</span>
         <div>
           <h1>AniScore Arena</h1>
-          <p>哪部动画在 Bangumi 上评分更高？</p>
+          <p>Bangumi 评分挑战</p>
         </div>
       </div>
-      <div class="top-actions">
-        <button class="ghost-button" id="mode-toggle" type="button">限时模式</button>
-        <button class="primary-button" id="restart" type="button">重新开始</button>
+      <div class="mode-switch" aria-label="游戏模式">
+        <button id="mode-classic" type="button" aria-pressed="true">经典</button>
+        <button id="mode-timed" type="button" aria-pressed="false">限时</button>
       </div>
     </header>
 
-    <section class="scoreboard" aria-label="游戏状态">
-      <div class="metric"><span id="metric-lives">5</span><small>机会</small></div>
-      <div class="metric"><span id="metric-streak">0</span><small>连击</small></div>
-      <div class="metric"><span id="metric-total">0</span><small>已答</small></div>
-      <div class="metric"><span id="metric-best">0</span><small>最佳</small></div>
-    </section>
-
-    <section class="stage" aria-live="polite">
-      <p class="prompt" id="prompt">数据加载中...</p>
-      <div class="arena">
-        <button class="anime-card" id="card-left" type="button" aria-label="选择左侧动画">
-          <span class="poster-wrap"><img id="image-left" alt="" /></span>
-          <span class="card-copy">
-            <strong id="title-left"></strong>
-            <span id="meta-left"></span>
-            <span class="score-line" id="score-left">?</span>
-          </span>
-          <span class="result-chip" id="chip-left"></span>
-        </button>
-        <div class="versus" aria-hidden="true">VS</div>
-        <button class="anime-card" id="card-right" type="button" aria-label="选择右侧动画">
-          <span class="poster-wrap"><img id="image-right" alt="" /></span>
-          <span class="card-copy">
-            <strong id="title-right"></strong>
-            <span id="meta-right"></span>
-            <span class="score-line" id="score-right">?</span>
-          </span>
-          <span class="result-chip" id="chip-right"></span>
-        </button>
-      </div>
-    </section>
-
-    <section class="control-deck" aria-label="筛选和说明">
-      <div class="panel controls">
-        <div class="panel-title">
-          <h2>筛选题库</h2>
-          <span id="pool-count">0 部</span>
+    <div class="game-layout">
+      <section class="stage" aria-live="polite">
+        <div class="stage-head">
+          <div>
+            <p class="prompt" id="prompt">数据加载中...</p>
+            <span class="round-note" id="round-note">选择评分更高的一侧</span>
+          </div>
+          <button class="ghost-button" id="restart" type="button">重新开始</button>
         </div>
-        <label>
-          最低投票数
-          <input id="min-votes" type="range" min="100" max="5000" step="100" value="800" />
-          <output id="min-votes-label">800</output>
-        </label>
-        <div class="range-row">
-          <label>
-            起始年份
-            <input id="year-min" type="number" min="1960" max="2030" value="1995" />
-          </label>
-          <label>
-            结束年份
-            <input id="year-max" type="number" min="1960" max="2030" value="${new Date().getFullYear()}" />
-          </label>
+        <div class="arena">
+          <button class="anime-card" id="card-left" type="button" aria-label="选择左侧动画">
+            <span class="poster-wrap"><img id="image-left" alt="" /></span>
+            <span class="card-copy">
+              <span class="card-meta" id="meta-left"></span>
+              <strong id="title-left"></strong>
+              <span class="score-line" id="score-left">?</span>
+            </span>
+            <span class="result-chip" id="chip-left"></span>
+          </button>
+          <div class="versus" aria-hidden="true">VS</div>
+          <button class="anime-card" id="card-right" type="button" aria-label="选择右侧动画">
+            <span class="poster-wrap"><img id="image-right" alt="" /></span>
+            <span class="card-copy">
+              <span class="card-meta" id="meta-right"></span>
+              <strong id="title-right"></strong>
+              <span class="score-line" id="score-right">?</span>
+            </span>
+            <span class="result-chip" id="chip-right"></span>
+          </button>
         </div>
-        <label>
-          排名范围
-          <select id="ranking">
-            <option value="all">全部</option>
-            <option value="top">高分前段</option>
-            <option value="mid">中游混战</option>
-          </select>
-        </label>
-        <label class="check-row">
-          <input id="hide-movies" type="checkbox" />
-          排除剧场版
-        </label>
-      </div>
+      </section>
 
-      <div class="panel notes">
-        <h2>本地原型</h2>
-        <p>这是原创实现的单人评分竞猜 MVP，数据通过脚本从 Bangumi API 生成到本地 JSON。下一步可以在这个状态机外接 WebSocket 房间，实现多人同题竞速。</p>
-        <dl>
-          <div><dt>经典</dt><dd>5 次机会，答错扣机会。</dd></div>
-          <div><dt>限时</dt><dd>90 秒冲分，答错不扣时间。</dd></div>
-          <div><dt>快捷键</dt><dd>按 1 / 2 选择左右卡片。</dd></div>
-        </dl>
-      </div>
-    </section>
+      <aside class="side-panel">
+        <section class="scoreboard" aria-label="游戏状态">
+          <div class="metric"><span id="metric-lives">5</span><small>机会</small></div>
+          <div class="metric"><span id="metric-streak">0</span><small>连击</small></div>
+          <div class="metric"><span id="metric-total">0</span><small>已答</small></div>
+          <div class="metric"><span id="metric-best">0</span><small>最佳</small></div>
+        </section>
+
+        <section class="panel controls" aria-label="筛选题库">
+          <div class="panel-title">
+            <h2>筛选</h2>
+            <span id="pool-count">0 部</span>
+          </div>
+
+          <div class="preset-row" aria-label="筛选预设">
+            <button type="button" data-preset="balanced">标准</button>
+            <button type="button" data-preset="recent">近年</button>
+            <button type="button" data-preset="hard">高手</button>
+          </div>
+
+          <label class="control-field">
+            <span>最低投票</span>
+            <input id="min-votes" type="range" min="100" max="5000" step="100" value="500" />
+            <output id="min-votes-label">500</output>
+          </label>
+
+          <div class="range-row">
+            <label class="control-field">
+              <span>起始年份</span>
+              <input id="year-min" type="number" min="1960" max="2030" value="1990" />
+            </label>
+            <label class="control-field">
+              <span>结束年份</span>
+              <input id="year-max" type="number" min="1960" max="2030" value="${new Date().getFullYear()}" />
+            </label>
+          </div>
+
+          <label class="control-field">
+            <span>排名范围</span>
+            <select id="ranking">
+              <option value="all">全部排名</option>
+              <option value="top500">Top 500</option>
+              <option value="top2000">Top 2000</option>
+              <option value="middle">中游混战</option>
+              <option value="deep">冷门区间</option>
+            </select>
+          </label>
+
+          <fieldset class="exclude-set">
+            <legend>排除</legend>
+            <div class="toggle-grid">
+              <label><input id="exclude-guochan" type="checkbox" checked /><span>国产</span></label>
+              <label><input id="exclude-movies" type="checkbox" checked /><span>剧场版</span></label>
+              <label><input id="exclude-ova" type="checkbox" checked /><span>OVA</span></label>
+              <label><input id="exclude-pamen" type="checkbox" checked /><span>泡面番</span></label>
+              <label><input id="exclude-oumei" type="checkbox" checked /><span>欧美</span></label>
+              <label><input id="exclude-short" type="checkbox" checked /><span>短片</span></label>
+              <label><input id="exclude-recap" type="checkbox" checked /><span>总集篇</span></label>
+            </div>
+          </fieldset>
+        </section>
+      </aside>
+    </div>
   </main>
 
   <dialog id="result-dialog" class="result-dialog">
@@ -186,7 +214,9 @@ const $ = <T extends HTMLElement>(id: string) => {
 
 const byId = {
   prompt: $('prompt'),
-  modeToggle: $('mode-toggle') as HTMLButtonElement,
+  roundNote: $('round-note'),
+  modeClassic: $('mode-classic') as HTMLButtonElement,
+  modeTimed: $('mode-timed') as HTMLButtonElement,
   restart: $('restart') as HTMLButtonElement,
   dialogRestart: $('dialog-restart') as HTMLButtonElement,
   copyResult: $('copy-result') as HTMLButtonElement,
@@ -201,7 +231,15 @@ const byId = {
   yearMin: $('year-min') as HTMLInputElement,
   yearMax: $('year-max') as HTMLInputElement,
   ranking: $('ranking') as HTMLSelectElement,
-  hideMovies: $('hide-movies') as HTMLInputElement,
+  excludes: {
+    guochan: $('exclude-guochan') as HTMLInputElement,
+    movies: $('exclude-movies') as HTMLInputElement,
+    ova: $('exclude-ova') as HTMLInputElement,
+    pamen: $('exclude-pamen') as HTMLInputElement,
+    oumei: $('exclude-oumei') as HTMLInputElement,
+    short: $('exclude-short') as HTMLInputElement,
+    recap: $('exclude-recap') as HTMLInputElement,
+  } satisfies Record<ExcludeKey, HTMLInputElement>,
 }
 
 function getBest(modeName: Mode) {
@@ -227,15 +265,41 @@ function yearOf(anime: Anime) {
   return Number.isFinite(year) ? year : 0
 }
 
+const excludeTerms: Record<ExcludeKey, string[]> = {
+  guochan: ['国产', '国漫', '中国', '中国大陆', '大陆'],
+  movies: ['剧场版', '劇場版', '剧场', '劇場', '映画'],
+  ova: ['OVA', 'OAD'],
+  pamen: ['泡面番', '泡面'],
+  oumei: ['欧美', '美国', '英国', '法国', '加拿大', '欧洲'],
+  short: ['短片', '短篇', 'Short'],
+  recap: ['总集篇', '總集篇', '总集', '總集', 'Recap'],
+}
+
+function animeText(anime: Anime) {
+  return `${anime.platform} ${anime.tags.join(' ')}`
+}
+
+function matchesAny(anime: Anime, terms: string[]) {
+  const text = animeText(anime).toLowerCase()
+  return terms.some((term) => text.includes(term.toLowerCase()))
+}
+
+function isExcluded(anime: Anime) {
+  return (Object.keys(settings.excludes) as ExcludeKey[]).some(
+    (key) => settings.excludes[key] && matchesAny(anime, excludeTerms[key]),
+  )
+}
+
 function applyFilters() {
   const filtered = allAnime.filter((anime) => {
     const year = yearOf(anime)
     const inYear = year === 0 || (year >= settings.yearMin && year <= settings.yearMax)
-    const isMovie = anime.platform.includes('剧场') || anime.tags.includes('剧场版')
     if (anime.votes < settings.minVotes || !inYear) return false
-    if (settings.hideMovies && isMovie) return false
-    if (settings.ranking === 'top') return anime.rank !== null && anime.rank <= 500
-    if (settings.ranking === 'mid') return anime.score >= 6.6 && anime.score <= 7.8
+    if (isExcluded(anime)) return false
+    if (settings.ranking === 'top500') return anime.rank !== null && anime.rank <= 500
+    if (settings.ranking === 'top2000') return anime.rank !== null && anime.rank <= 2000
+    if (settings.ranking === 'middle') return anime.rank !== null && anime.rank >= 1200 && anime.rank <= 4500
+    if (settings.ranking === 'deep') return anime.rank !== null && anime.rank >= 4500
     return true
   })
   pool = filtered.sort((a, b) => b.score - a.score)
@@ -311,7 +375,9 @@ function renderStats() {
   byId.metricStreak.textContent = String(stats.streak)
   byId.metricTotal.textContent = String(stats.total)
   byId.metricBest.textContent = String(Math.max(getBest(mode), stats.correct))
-  byId.modeToggle.textContent = mode === 'classic' ? '限时模式' : '经典模式'
+  byId.modeClassic.setAttribute('aria-pressed', mode === 'classic' ? 'true' : 'false')
+  byId.modeTimed.setAttribute('aria-pressed', mode === 'timed' ? 'true' : 'false')
+  byId.roundNote.textContent = mode === 'timed' ? '90 秒冲分' : '5 次机会'
 }
 
 function render() {
@@ -455,10 +521,40 @@ function syncSettings() {
     minVotes: Number.parseInt(byId.minVotes.value, 10),
     yearMin: Number.parseInt(byId.yearMin.value, 10),
     yearMax: Number.parseInt(byId.yearMax.value, 10),
-    ranking: byId.ranking.value as Settings['ranking'],
-    hideMovies: byId.hideMovies.checked,
+    ranking: byId.ranking.value as RankingFilter,
+    excludes: {
+      guochan: byId.excludes.guochan.checked,
+      movies: byId.excludes.movies.checked,
+      ova: byId.excludes.ova.checked,
+      pamen: byId.excludes.pamen.checked,
+      oumei: byId.excludes.oumei.checked,
+      short: byId.excludes.short.checked,
+      recap: byId.excludes.recap.checked,
+    },
   }
   byId.minVotesLabel.textContent = String(settings.minVotes)
+}
+
+function applyPreset(name: string) {
+  const year = new Date().getFullYear()
+  if (name === 'recent') {
+    byId.minVotes.value = '300'
+    byId.yearMin.value = String(year - 10)
+    byId.yearMax.value = String(year)
+    byId.ranking.value = 'all'
+  } else if (name === 'hard') {
+    byId.minVotes.value = '1200'
+    byId.yearMin.value = '1995'
+    byId.yearMax.value = String(year)
+    byId.ranking.value = 'top2000'
+  } else {
+    byId.minVotes.value = '500'
+    byId.yearMin.value = '1990'
+    byId.yearMax.value = String(year)
+    byId.ranking.value = 'all'
+  }
+  syncSettings()
+  restartGame()
 }
 
 function bindEvents() {
@@ -466,8 +562,12 @@ function bindEvents() {
   card('right').root.addEventListener('click', () => select('right'))
   byId.restart.addEventListener('click', restartGame)
   byId.dialogRestart.addEventListener('click', restartGame)
-  byId.modeToggle.addEventListener('click', () => {
-    mode = mode === 'classic' ? 'timed' : 'classic'
+  byId.modeClassic.addEventListener('click', () => {
+    mode = 'classic'
+    restartGame()
+  })
+  byId.modeTimed.addEventListener('click', () => {
+    mode = 'timed'
     restartGame()
   })
   byId.copyResult.addEventListener('click', async () => {
@@ -476,12 +576,21 @@ function bindEvents() {
     byId.copyResult.textContent = '已复制'
     window.setTimeout(() => (byId.copyResult.textContent = '复制战绩'), 1200)
   })
-  ;[byId.minVotes, byId.yearMin, byId.yearMax, byId.ranking, byId.hideMovies].forEach((control) => {
+  ;[
+    byId.minVotes,
+    byId.yearMin,
+    byId.yearMax,
+    byId.ranking,
+    ...Object.values(byId.excludes),
+  ].forEach((control) => {
     control.addEventListener('change', () => {
       syncSettings()
       restartGame()
     })
     control.addEventListener('input', syncSettings)
+  })
+  document.querySelectorAll<HTMLButtonElement>('[data-preset]').forEach((button) => {
+    button.addEventListener('click', () => applyPreset(button.dataset.preset ?? 'balanced'))
   })
   window.addEventListener('keydown', (event) => {
     if (event.key === '1') select('left')

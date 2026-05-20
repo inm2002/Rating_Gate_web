@@ -1,7 +1,7 @@
 import { chromium } from 'playwright-core'
 import { createServer } from 'vite'
 
-const port = 5173
+const port = 5174
 const url = `http://127.0.0.1:${port}/`
 const chromePath = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
 
@@ -32,7 +32,7 @@ try {
   await page.locator('#card-left').click()
   await page.waitForTimeout(1400)
   const totalAfterClick = await page.locator('#metric-total').innerText()
-  await page.locator('#mode-toggle').click()
+  await page.locator('#mode-timed').click()
   await page.waitForTimeout(400)
   const timerText = await page.locator('#metric-lives').innerText()
 

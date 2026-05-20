@@ -7,7 +7,9 @@
 - 左右卡片评分竞猜
 - 经典模式：5 次机会
 - 限时模式：90 秒冲分
-- 投票数、年份、排名段、剧场版筛选
+- 投票数、年份、排名段筛选
+- 排除国产、剧场版、OVA、泡面番、欧美、短片、总集篇
+- 标准、近年、高手三组快捷预设
 - 本地历史最佳记录
 - 官方 Bangumi API 题库生成脚本
 - 无头浏览器 smoke test
@@ -33,7 +35,7 @@ npm run test:smoke
 
 ## 数据来源
 
-题库由 `scripts/fetch-bangumi-seed.mjs` 通过 Bangumi API 搜索生成，输出到 `public/anime-seed.json`。项目没有复制第三方站点的源码、样式文件或数据文件。
+题库由 `scripts/fetch-bangumi-seed.mjs` 通过 Bangumi API 分段抓取生成，输出到 `public/anime-seed.json`。当前题库约 6600 条动画；默认筛选会排除部分特殊类型，实际可玩池会小一些。项目没有复制第三方站点的源码、样式文件或数据文件。
 
 ## 多人联机方向
 
