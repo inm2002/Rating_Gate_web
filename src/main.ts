@@ -1,41 +1,30 @@
 import './style.css'
 
-type Mode = 'classic' | 'timed'
+import {
+  MAX_LIVES,
+  TIME_LIMIT,
+  addDiffBucket,
+  applyPresetSettings,
+  createDefaultSettings,
+  createInitialRound,
+  detectPreset,
+  filterAnime,
+  judgeAnswer,
+  pickNextAnime,
+  titleOf,
+  updateStats,
+  yearOf,
+  type Anime,
+  type ExcludeKey,
+  type Mode,
+  type PresetName,
+  type RankingFilter,
+  type Settings,
+  type Side,
+  type Stats,
+} from './game-core'
+
 type Phase = 'loading' | 'ready' | 'playing' | 'reveal' | 'ended'
-type PresetName = 'standard' | 'akashi' | 'brahmin'
-type Side = 'left' | 'right'
-type RankingFilter = 'all' | 'top500' | 'top2000' | 'middle' | 'deep'
-type ExcludeKey = 'guochan' | 'movies' | 'ova' | 'pamen' | 'oumei' | 'short' | 'recap'
-
-interface Anime {
-  id: number
-  name: string
-  nameCn: string
-  score: number
-  votes: number
-  rank: number | null
-  date: string
-  image: string
-  tags: string[]
-  platform: string
-}
-
-interface Stats {
-  total: number
-  correct: number
-  streak: number
-  bestStreak: number
-}
-
-interface Settings {
-  minVotes: number
-  scoreMin: number
-  scoreMax: number
-  yearMin: number
-  yearMax: number
-  ranking: RankingFilter
-  excludes: Record<ExcludeKey, boolean>
-}
 
 interface AnimeSeedMeta {
   generatedAt: string
@@ -43,10 +32,7 @@ interface AnimeSeedMeta {
   count: number
 }
 
-const MAX_LIVES = 5
-const TIME_LIMIT = 90
 const BEST_KEY = 'aniscore-arena-best-v1'
-const presetExcludeDefaults: ExcludeKey[] = ['guochan', 'movies', 'oumei', 'recap']
 
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('Missing #app')
@@ -70,23 +56,7 @@ let revealId = 0
 let stats: Stats = { total: 0, correct: 0, streak: 0, bestStreak: 0 }
 let diffBuckets = [0, 0, 0, 0]
 let activePreset: PresetName | null = 'standard'
-let settings: Settings = {
-  minVotes: 100,
-  scoreMin: 0,
-  scoreMax: 10,
-  yearMin: 1900,
-  yearMax: new Date().getFullYear(),
-  ranking: 'all',
-  excludes: {
-    guochan: true,
-    movies: true,
-    ova: false,
-    pamen: false,
-    oumei: true,
-    short: false,
-    recap: true,
-  },
-}
+let settings: Settings = createDefaultSettings()
 
 app.innerHTML = `
   <main class="shell">
@@ -312,15 +282,6 @@ function setBest(modeName: Mode, value: number) {
   localStorage.setItem(BEST_KEY, JSON.stringify(saved))
 }
 
-function titleOf(anime: Anime) {
-  return anime.nameCn || anime.name
-}
-
-function yearOf(anime: Anime) {
-  const year = Number.parseInt(anime.date.slice(0, 4), 10)
-  return Number.isFinite(year) ? year : 0
-}
-
 function formatUpdatedAt(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''
@@ -334,64 +295,9 @@ function formatUpdatedAt(value: string) {
   })
 }
 
-const excludeTerms: Record<ExcludeKey, string[]> = {
-  guochan: ['国产', '国漫', '中国', '中国大陆', '大陆'],
-  movies: ['剧场版', '劇場版', '剧场', '劇場', '映画'],
-  ova: ['OVA', 'OAD'],
-  pamen: ['泡面番', '泡面'],
-  oumei: ['欧美', '美国', '英国', '法国', '加拿大', '欧洲'],
-  short: ['短片', '短篇', 'Short'],
-  recap: ['总集篇', '總集篇', '总集', '總集', 'Recap'],
-}
-
-function animeText(anime: Anime) {
-  return `${anime.platform} ${anime.tags.join(' ')}`
-}
-
-function matchesAny(anime: Anime, terms: string[]) {
-  const text = animeText(anime).toLowerCase()
-  return terms.some((term) => text.includes(term.toLowerCase()))
-}
-
-function isExcluded(anime: Anime) {
-  return (Object.keys(settings.excludes) as ExcludeKey[]).some(
-    (key) => settings.excludes[key] && matchesAny(anime, excludeTerms[key]),
-  )
-}
-
 function applyFilters() {
-  const filtered = allAnime.filter((anime) => {
-    const year = yearOf(anime)
-    const inYear = year === 0 || (year >= settings.yearMin && year <= settings.yearMax)
-    if (anime.votes < settings.minVotes || !inYear) return false
-    if (anime.score < settings.scoreMin || anime.score > settings.scoreMax) return false
-    if (isExcluded(anime)) return false
-    if (settings.ranking === 'top500') return anime.rank !== null && anime.rank <= 500
-    if (settings.ranking === 'top2000') return anime.rank !== null && anime.rank <= 2000
-    if (settings.ranking === 'middle') return anime.rank !== null && anime.rank >= 1200 && anime.rank <= 4500
-    if (settings.ranking === 'deep') return anime.rank !== null && anime.rank >= 4500
-    return true
-  })
-  pool = filtered.sort((a, b) => b.score - a.score)
+  pool = filterAnime(allAnime, settings)
   byId.poolCount.textContent = `${pool.length} 部`
-}
-
-function randomAnime() {
-  return pool[Math.floor(Math.random() * pool.length)] ?? null
-}
-
-function pickNext(anchor: Anime) {
-  let candidates = pool.filter(
-    (anime) => anime.id !== anchor.id && anime.score !== anchor.score && !seen.has(anime.id),
-  )
-  if (candidates.length < 2) {
-    seen = new Set([anchor.id])
-    candidates = pool.filter((anime) => anime.id !== anchor.id && anime.score !== anchor.score)
-  }
-  const close = candidates.filter((anime) => Math.abs(anime.score - anchor.score) <= 0.45)
-  const medium = candidates.filter((anime) => Math.abs(anime.score - anchor.score) <= 0.9)
-  const source = close.length > 2 && Math.random() < 0.62 ? close : medium.length > 2 ? medium : candidates
-  return source[Math.floor(Math.random() * source.length)] ?? null
 }
 
 function setPrompt(text: string, tone: 'neutral' | 'good' | 'bad' = 'neutral') {
@@ -541,21 +447,14 @@ function restartGame() {
   selectedSide = null
   winningSide = null
   isTie = false
-  const distinctScores = new Set(pool.map((anime) => anime.score))
-  phase = pool.length >= 2 && distinctScores.size >= 2 ? 'playing' : 'ended'
+  const round = createInitialRound(pool)
+  phase = round ? 'playing' : 'ended'
   left = null
   right = null
-  for (let attempt = 0; attempt < 30 && phase === 'playing'; attempt += 1) {
-    const candidate = randomAnime()
-    if (!candidate) break
-    seen = new Set([candidate.id])
-    const next = pickNext(candidate)
-    if (next) {
-      left = candidate
-      right = next
-      seen.add(next.id)
-      break
-    }
+  if (round) {
+    left = round.left
+    right = round.right
+    seen = round.seen
   }
   if (!left || !right) {
     setPrompt('当前筛选下题目不足，或评分都相同，请放宽条件。', 'bad')
@@ -571,34 +470,23 @@ function restartGame() {
   render()
 }
 
-function recordDiff(a: Anime, b: Anime) {
-  const diff = Math.abs(a.score - b.score)
-  if (diff <= 0.2) diffBuckets[0] += 1
-  else if (diff <= 0.5) diffBuckets[1] += 1
-  else if (diff <= 1) diffBuckets[2] += 1
-  else diffBuckets[3] += 1
-}
-
 function select(side: Side) {
   if (phase !== 'playing' || !left || !right) return
   phase = 'reveal'
   selectedSide = side
-  isTie = left.score === right.score
-  winningSide = isTie ? side : left.score > right.score ? 'left' : 'right'
-  const correct = isTie || selectedSide === winningSide
-  stats.total += 1
-  stats.streak = correct ? stats.streak + 1 : 0
-  stats.bestStreak = Math.max(stats.bestStreak, stats.streak)
-  if (correct) stats.correct += 1
-  if (!correct && mode === 'classic') lives -= 1
-  recordDiff(left, right)
+  const result = judgeAnswer(left, right, side)
+  isTie = result.isTie
+  winningSide = result.winningSide
+  stats = updateStats(stats, result.correct)
+  if (!result.correct && mode === 'classic') lives -= 1
+  diffBuckets = addDiffBucket(diffBuckets, result.diff)
   setPrompt(
     isTie
       ? `平分，都是 ${left.score.toFixed(1)} 分`
-      : correct
-        ? `答对，分差 ${Math.abs(left.score - right.score).toFixed(1)}`
-        : `答错，分差 ${Math.abs(left.score - right.score).toFixed(1)}`,
-    correct ? 'good' : 'bad',
+      : result.correct
+        ? `答对，分差 ${result.diff.toFixed(1)}`
+        : `答错，分差 ${result.diff.toFixed(1)}`,
+    result.correct ? 'good' : 'bad',
   )
   render()
   if (mode === 'classic' && lives <= 0) {
@@ -612,13 +500,14 @@ function advanceRound() {
   if (!right) return
   left = right
   seen.add(left.id)
-  const next = pickNext(left)
+  const next = pickNextAnime(pool, left, seen)
   if (!next) {
     endGame('题库用完')
     return
   }
-  right = next
-  seen.add(next.id)
+  seen = next.seen
+  right = next.anime
+  seen.add(next.anime.id)
   phase = 'playing'
   firstRound = false
   selectedSide = null
@@ -684,68 +573,20 @@ function syncSettings() {
   byId.scoreMin.value = settings.scoreMin.toFixed(1).replace('.0', '')
   byId.scoreMax.value = settings.scoreMax.toFixed(1).replace('.0', '')
   byId.minVotesLabel.textContent = String(settings.minVotes)
-  activePreset = detectPreset()
-}
-
-function hasPresetExcludes() {
-  return (Object.keys(byId.excludes) as ExcludeKey[]).every(
-    (key) => byId.excludes[key].checked === presetExcludeDefaults.includes(key),
-  )
-}
-
-function detectPreset(): PresetName | null {
-  const year = new Date().getFullYear()
-  if (!hasPresetExcludes()) return null
-  const base =
-    byId.minVotes.value === '100' &&
-    byId.scoreMin.value === '0' &&
-    byId.yearMin.value === '1900' &&
-    byId.ranking.value === 'all'
-  if (base && byId.scoreMax.value === '10' && byId.yearMax.value === String(year)) return 'standard'
-  if (base && byId.scoreMax.value === '4.9' && byId.yearMax.value === String(year)) return 'akashi'
-  if (
-    byId.minVotes.value === '100' &&
-    byId.scoreMin.value === '0' &&
-    byId.scoreMax.value === '10' &&
-    byId.yearMin.value === '1900' &&
-    byId.yearMax.value === '2009' &&
-    byId.ranking.value === 'deep'
-  ) {
-    return 'brahmin'
-  }
-  return null
+  activePreset = detectPreset(settings)
 }
 
 function applyPreset(name: PresetName) {
-  const year = new Date().getFullYear()
-  Object.values(byId.excludes).forEach((input) => {
-    input.checked = false
+  const presetSettings = applyPresetSettings(name)
+  byId.minVotes.value = String(presetSettings.minVotes)
+  byId.scoreMin.value = String(presetSettings.scoreMin)
+  byId.scoreMax.value = String(presetSettings.scoreMax)
+  byId.yearMin.value = String(presetSettings.yearMin)
+  byId.yearMax.value = String(presetSettings.yearMax)
+  byId.ranking.value = presetSettings.ranking
+  ;(Object.keys(byId.excludes) as ExcludeKey[]).forEach((key) => {
+    byId.excludes[key].checked = presetSettings.excludes[key]
   })
-  presetExcludeDefaults.forEach((key) => {
-    byId.excludes[key].checked = true
-  })
-  if (name === 'akashi') {
-    byId.minVotes.value = '100'
-    byId.scoreMin.value = '0'
-    byId.scoreMax.value = '4.9'
-    byId.yearMin.value = '1900'
-    byId.yearMax.value = String(year)
-    byId.ranking.value = 'all'
-  } else if (name === 'brahmin') {
-    byId.minVotes.value = '100'
-    byId.scoreMin.value = '0'
-    byId.scoreMax.value = '10'
-    byId.yearMin.value = '1900'
-    byId.yearMax.value = '2009'
-    byId.ranking.value = 'deep'
-  } else {
-    byId.minVotes.value = '100'
-    byId.scoreMin.value = '0'
-    byId.scoreMax.value = '10'
-    byId.yearMin.value = '1900'
-    byId.yearMax.value = String(year)
-    byId.ranking.value = 'all'
-  }
   syncSettings()
   restartGame()
 }
