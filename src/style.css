@@ -531,6 +531,7 @@ h1 {
   display: grid;
   gap: 8px;
   margin-top: 18px;
+  margin-bottom: 10px;
 }
 
 .rank-row {
@@ -572,6 +573,17 @@ h1 {
 .rank-row.is-you {
   border-color: rgba(216, 95, 134, 0.42);
   background: rgba(216, 95, 134, 0.08);
+}
+
+.room-result-dialog .result-box {
+  display: grid;
+  gap: 10px;
+}
+
+.room-result-dialog .dialog-actions {
+  margin-top: 6px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
 }
 
 .room-actions .primary-button:disabled {

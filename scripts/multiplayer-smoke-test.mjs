@@ -104,6 +104,8 @@ try {
 
   await host.locator('#room-answer-left').click()
   await host.waitForSelector('#room-match-note:text("等待房间内所有玩家")')
+  const selectedClass = await host.locator('#room-answer-left').getAttribute('class')
+  if (!selectedClass.includes('is-selected')) throw new Error(`Selected answer was not highlighted: ${selectedClass}`)
   await guest.locator('#room-answer-right').click()
   await host.waitForSelector('#room-battle-status:text("结算中")')
   await guest.waitForSelector('#room-battle-status:text("结算中")')
@@ -116,6 +118,11 @@ try {
   const rankText = await host.locator('#room-rank-list').innerText()
   if (!/\d+ 分/.test(hostScoreRows)) throw new Error(`Scoreboard did not render scores: ${hostScoreRows}`)
   if (!rankText.includes('房主') || !rankText.includes('挑战者')) throw new Error(`Ranking did not render players: ${rankText}`)
+  await host.locator('#room-result-close').click()
+  await host.waitForSelector('#room-lobby:not([hidden])')
+  await guest.waitForSelector('#room-lobby:not([hidden])')
+  const dialogClosed = await guest.locator('#room-result-dialog').evaluate((node) => !node.open)
+  if (!dialogClosed) throw new Error('Guest result dialog did not close after returning to lobby')
   if (errors.length) throw new Error(`Browser errors:\n${errors.join('\n')}`)
 
   await browser.close()

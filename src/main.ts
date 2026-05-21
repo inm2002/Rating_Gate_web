@@ -87,6 +87,7 @@ interface RemoteGame {
   length: number
   endsAt: number | null
   pair: RemotePair | null
+  selectedSide: Side | null
   reveal: RemoteReveal | null
 }
 
@@ -516,7 +517,7 @@ app.innerHTML = `
       <h2>本场排名</h2>
       <div class="room-rank-list" id="room-rank-list"></div>
       <div class="dialog-actions">
-        <button class="primary-button" id="room-result-close" type="button">回到房间</button>
+        <button class="primary-button" id="room-result-close" type="button">回到大厅</button>
       </div>
     </div>
   </dialog>
@@ -772,6 +773,10 @@ function handleRoomMessage(event: MessageEvent<string>) {
   }
   if (message.type === 'roomState') {
     remoteRoom = message.room
+    if (remoteRoom.status === 'lobby') {
+      remoteGame = null
+      if (byId.roomResultDialog.open) byId.roomResultDialog.close()
+    }
     const you = remoteRoom.players.find((player) => player.id === remoteRoom?.youId)
     localRoom = {
       code: remoteRoom.code,
@@ -989,7 +994,7 @@ function renderRoomSide(side: Side, pair: RemotePair | null, reveal: RemoteRevea
   view.root.classList.toggle('is-winner', revealWinner)
   view.root.classList.toggle('is-wrong', selected && reveal?.correct === false)
   view.root.classList.toggle('is-correct', selected && reveal?.correct === true)
-  if (selected) {
+  if (selected && typeof reveal?.correct === 'boolean') {
     view.chip.textContent = reveal?.correct ? '✓ 正确' : '✕ 错误'
     view.chip.classList.add(reveal?.correct ? 'is-correct' : 'is-wrong')
   } else if (revealWinner) {
@@ -1040,7 +1045,8 @@ function renderRoomMatch() {
               : game.reveal?.correct === false
                 ? '上一题答错，下一题继续。'
                 : '每位玩家各自连续作答，只有总时间同步。'
-  const cardReveal = room.mode === 'classic' ? reveal : null
+  const pendingSelection: RemoteReveal | null = !reveal && game.selectedSide ? { selectedSide: game.selectedSide } : null
+  const cardReveal = room.mode === 'classic' ? (reveal ?? pendingSelection) : null
   renderRoomSide('left', pair, cardReveal)
   renderRoomSide('right', pair, cardReveal)
   byId.roomAnswerLeft.disabled = !canAnswer
@@ -1217,6 +1223,11 @@ function leaveNetworkRoom() {
   roomResultShownKey = ''
   if (byId.roomResultDialog.open) byId.roomResultDialog.close()
   renderRoom()
+}
+
+function returnRoomToLobby() {
+  if (byId.roomResultDialog.open) byId.roomResultDialog.close()
+  sendRoomMessage({ type: 'returnToLobby' })
 }
 
 async function copyRoomCode() {
@@ -1565,7 +1576,7 @@ function bindEvents() {
   byId.joinRoom.addEventListener('click', joinNetworkRoom)
   byId.leaveRoom.addEventListener('click', leaveNetworkRoom)
   byId.leaveRoomBattle.addEventListener('click', leaveNetworkRoom)
-  byId.roomResultClose.addEventListener('click', () => byId.roomResultDialog.close())
+  byId.roomResultClose.addEventListener('click', returnRoomToLobby)
   byId.copyRoomCode.addEventListener('click', copyRoomCode)
   byId.toastClose.addEventListener('click', closeToast)
   byId.roomStart.addEventListener('click', () => {

@@ -220,6 +220,7 @@ function gamePayload(room, playerIdForClient) {
   const reveal = room.status === 'reveal' || room.status === 'ended'
   const player = room.players.get(playerIdForClient)
   const pair = room.mode === 'timed' ? player?.pair : room.pair
+  const selectedSide = room.mode === 'classic' ? (room.answers.get(playerIdForClient)?.selectedSide ?? null) : null
   return {
     status: room.status,
     mode: room.mode,
@@ -227,6 +228,7 @@ function gamePayload(room, playerIdForClient) {
     length: room.mode === 'timed' ? room.timedSeconds : room.classicRounds,
     endsAt: room.endsAt,
     pair: publicPair(pair, reveal && room.mode === 'classic'),
+    selectedSide,
     reveal: room.mode === 'classic' && reveal ? room.reveal : player?.lastResult ?? null,
   }
 }
@@ -380,6 +382,25 @@ function endRoom(room, reason) {
   broadcastRoom(room)
 }
 
+function returnToLobby(ws) {
+  const room = findRoomFor(ws)
+  if (!room || room.status !== 'ended') return
+  clearTimeout(room.timer)
+  clearTimeout(room.advanceTimer)
+  room.status = 'lobby'
+  room.answers = new Map()
+  room.round = 0
+  room.pair = null
+  room.pool = []
+  room.reveal = null
+  room.endsAt = null
+  for (const player of room.players.values()) {
+    player.pair = null
+    player.lastResult = null
+  }
+  broadcastRoom(room)
+}
+
 function answer(ws, payload) {
   const room = findRoomFor(ws)
   const client = clients.get(ws)
@@ -475,6 +496,7 @@ wss.on('connection', (ws) => {
       broadcastRoom(room)
     } else if (payload.type === 'startGame') startGame(ws)
     else if (payload.type === 'answer') answer(ws, payload)
+    else if (payload.type === 'returnToLobby') returnToLobby(ws)
     else if (payload.type === 'updateNickname') updateNickname(ws, payload)
     else if (payload.type === 'leaveRoom') leave(ws)
   })
