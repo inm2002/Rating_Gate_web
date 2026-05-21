@@ -13,6 +13,8 @@ example.com
 
 生产环境未配置 `VITE_WS_URL` 时，前端默认连接当前域名下的 `wss://<host>/ws`。若站点部署在 `https://ratinggate.cn`，多人联机服务默认使用 `wss://ratinggate.cn/ws`。
 
+题库通过 GitHub Actions 在北京时间每周一 00:00 自动重新生成并提交到仓库。Cloudflare Pages 连接 GitHub 仓库后，会在数据提交后触发一次前端部署。
+
 ## 计量优化策略
 
 - 服务端不做逐秒倒计时广播。
@@ -42,6 +44,8 @@ Pages 只负责部署前端静态资源，不应在 Pages 的 Deploy command 中
 ```text
 VITE_WS_URL=wss://<站点域名>/ws
 ```
+
+仓库中的 `Update Bangumi Data` 工作流也可以在 GitHub Actions 页面手动运行，用于立即刷新题库并触发一次 Pages 部署。
 
 ## Worker 部署
 

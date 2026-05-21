@@ -482,6 +482,7 @@ app.innerHTML = `
     <footer class="site-footer">
       <span>数据来源 <a href="https://bangumi.tv/" target="_blank" rel="noopener">Bangumi</a></span>
       <span>参考来源 <a href="https://bangumi-master.logicry.cc/" target="_blank" rel="noopener">目标是Bangumi大师</a></span>
+      <span>仓库 <a href="https://github.com/inm2002/Rating_Gate_web" target="_blank" rel="noopener">inm2002/Rating_Gate_web</a></span>
       <span id="data-updated">数据更新时间 --</span>
     </footer>
   </main>
@@ -674,6 +675,7 @@ function formatUpdatedAt(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''
   return date.toLocaleString('zh-CN', {
+    timeZone: 'Asia/Shanghai',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',

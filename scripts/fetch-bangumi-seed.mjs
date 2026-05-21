@@ -93,7 +93,7 @@ async function requestPage(query, offset) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'User-Agent': 'AniScoreArenaPrototype/0.2 (local seed generator)',
+      'User-Agent': 'RatingGate/1.0 (scheduled seed generator)',
     },
     body: JSON.stringify({
       keyword: '',

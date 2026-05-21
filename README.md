@@ -17,8 +17,9 @@
 - 多人房间：创建/加入房间、房主同步设置、联机比赛舞台、经典同步赛、限时冲分赛、赛后排名
 - 答对、答错、高分答案的独立视觉标识
 - 本地历史最佳记录
-- 页脚标注 Bangumi 数据来源、参考项目来源和数据更新时间
+- 页脚标注 Bangumi 数据来源、参考项目来源、GitHub 仓库和数据更新时间
 - Bangumi API 题库生成脚本
+- GitHub Actions 每周自动刷新题库
 - 无头浏览器 smoke test 和多人联机回归测试
 
 ## 技术结构
@@ -74,6 +75,8 @@ npm run test:multiplayer
 ## 数据来源
 
 题库由 `scripts/fetch-bangumi-seed.mjs` 通过 Bangumi API 分段抓取生成，输出到 `public/anime-seed.json`，更新时间输出到 `public/anime-seed-meta.json`。
+
+仓库配置了 GitHub Actions 定时任务，会在北京时间每周一 00:00 自动重新生成题库并提交更新。也可以在 Actions 页面手动运行 `Update Bangumi Data` 工作流。
 
 当前题库约 7000 条动画。标准预设使用基础题库；赤石大王只保留评分 5.0 以下作品；婆罗门偏向 2010 年以前的小众作品。三组预设都会默认排除国产、剧场版、欧美和总集篇。
 
