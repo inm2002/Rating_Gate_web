@@ -1,17 +1,17 @@
 # Cloudflare 部署指南
 
-EdgeOne 部署方案已弃用。当前部署方案使用 Cloudflare Pages 托管前端，并使用 Cloudflare Workers + Durable Objects 提供多人联机服务。
+本文档说明如何使用 Cloudflare Pages、Cloudflare Workers 和 Durable Objects 部署 Rating;Gate。
 
 ## 架构
 
 ```text
-ratinggate.cn
+example.com
   /      -> Cloudflare Pages 前端
   /ws*   -> Cloudflare Worker
             -> Durable Object 内存房间状态
 ```
 
-生产环境未配置 `VITE_WS_URL` 时，前端默认连接当前域名下的 `wss://<host>/ws`。因此 `https://ratinggate.cn` 会自动连接 `wss://ratinggate.cn/ws`。
+生产环境未配置 `VITE_WS_URL` 时，前端默认连接当前域名下的 `wss://<host>/ws`。若站点部署在 `https://ratinggate.cn`，多人联机服务默认使用 `wss://ratinggate.cn/ws`。
 
 ## 计量优化策略
 
@@ -24,7 +24,7 @@ ratinggate.cn
 - 经典模式只在玩家作答、结算、进入下一题等状态变化时广播。
 - 限时模式只在玩家作答和比赛结束时广播。
 
-## 前端 Pages 部署
+## 前端部署
 
 Cloudflare Pages 使用仓库根目录构建：
 
@@ -34,10 +34,10 @@ Build command: npm ci && npm run build
 Output directory: dist
 ```
 
-若前端和 Worker 共用 `ratinggate.cn`，Pages 环境变量通常无需设置。若已经配置过旧的 `VITE_WS_URL`，需要删除或改为：
+若前端和 Worker 共用同一域名，Pages 环境变量通常无需设置。若需要显式指定联机服务地址，可设置：
 
 ```text
-VITE_WS_URL=wss://ratinggate.cn/ws
+VITE_WS_URL=wss://<站点域名>/ws
 ```
 
 ## Worker 部署
@@ -51,20 +51,22 @@ npx wrangler login
 npx wrangler deploy
 ```
 
-`worker/wrangler.toml` 已配置路由：
+`worker/wrangler.toml` 中的默认路由为：
 
 ```text
 ratinggate.cn/ws*
 ```
 
-部署后，Cloudflare 会让 `https://ratinggate.cn/ws` 进入 Worker，其余页面路径继续由 Pages 处理。
+如果使用其他域名，需要同步修改 `worker/wrangler.toml` 中的 `routes` 配置。
+
+部署后，`/ws` 路径由 Worker 处理，其余页面路径继续由 Cloudflare Pages 处理。
 
 ## 上线验证
 
 普通浏览器访问：
 
 ```text
-https://ratinggate.cn/ws
+https://<站点域名>/ws
 ```
 
 应返回类似：
@@ -98,17 +100,17 @@ npm run dev
 npm run dev:ws
 ```
 
-本地模式仍使用 `ws://127.0.0.1:8787`，便于不依赖 Cloudflare 调试前端和房间协议。
+本地模式使用 `ws://127.0.0.1:8787`，用于在不依赖 Cloudflare 的情况下调试前端和房间协议。
 
 ## 常见问题
 
-### 多人模式仍提示无法连接联机服务
+### 多人模式提示无法连接联机服务
 
-检查 Pages 环境变量是否仍保留旧的 `VITE_WS_URL`。同域名方案下可删除该变量，或设置为 `wss://ratinggate.cn/ws`。
+检查 Pages 环境变量中的 `VITE_WS_URL` 是否指向正确的 Worker 地址。同域名方案下可以不设置该变量，或设置为 `wss://<站点域名>/ws`。
 
 ### `/ws` 返回 Pages 页面或 404
 
-检查 Worker route 是否生效。路由应为：
+检查 Worker route 是否生效。使用 `ratinggate.cn` 时，路由应为：
 
 ```text
 ratinggate.cn/ws*

@@ -83,4 +83,4 @@ npm run test:multiplayer
 
 部署方案使用 Cloudflare Pages 托管前端，并通过 Cloudflare Workers + Durable Objects 提供 `ratinggate.cn/ws` 实时房间服务。前端页面和多人联机共用 `ratinggate.cn`。
 
-部署步骤见 [docs/deploy-edgeone.md](docs/deploy-edgeone.md)。
+部署步骤见 [docs/deploy-cloudflare.md](docs/deploy-cloudflare.md)。
