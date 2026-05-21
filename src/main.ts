@@ -92,7 +92,9 @@ interface RemoteGame {
 }
 
 const BEST_KEY = 'aniscore-arena-best-v1'
-const ROOM_WS_URL = import.meta.env.VITE_WS_URL ?? 'ws://127.0.0.1:8787'
+const ROOM_WS_URL =
+  import.meta.env.VITE_WS_URL ??
+  (location.protocol === 'https:' ? `wss://${location.host}/ws` : 'ws://127.0.0.1:8787')
 
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('Missing #app')

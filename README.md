@@ -29,7 +29,7 @@ npm run dev
 npm run dev:ws
 ```
 
-本地开发地址默认为 `http://127.0.0.1:5173/`。多人联机需要同时运行 `npm run dev:ws`，默认房间服务地址为 `ws://127.0.0.1:8787`；如需改地址，可设置 `VITE_WS_URL`。
+本地开发地址默认为 `http://127.0.0.1:5173/`。多人联机需要同时运行 `npm run dev:ws`，默认房间服务地址为 `ws://127.0.0.1:8787`；如需改地址，可设置 `VITE_WS_URL`。生产环境没有设置 `VITE_WS_URL` 时会自动连接当前域名下的 `wss://<host>/ws`。
 
 ## 验证
 
@@ -56,4 +56,4 @@ npm run test:multiplayer
 - 更完整的计时模式回放和结算页
 - 线上持久化排行榜
 
-免费部署方案可以优先考虑 GitHub 托管源码、Cloudflare Pages 托管前端、Cloudflare Workers + Durable Objects 承担实时房间服务。
+面向中国大陆用户的免费部署方案可以优先考虑 GitHub 托管源码、EdgeOne Pages 托管前端和 `node-functions/websocket.js` 承担实时房间服务。部署步骤见 [docs/deploy-edgeone.md](docs/deploy-edgeone.md)。

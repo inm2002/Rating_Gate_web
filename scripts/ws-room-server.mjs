@@ -11,7 +11,7 @@ const port = Number.parseInt(process.env.BGM_WS_PORT ?? '8787', 10)
 const maxPlayers = 8
 const currentYear = new Date().getFullYear()
 
-const allAnime = JSON.parse(await readFile(join(rootDir, 'public', 'anime-seed.json'), 'utf8'))
+let allAnime = []
 
 const presetExcludeDefaults = ['guochan', 'movies', 'oumei', 'recap']
 const excludeTerms = {
@@ -24,18 +24,18 @@ const excludeTerms = {
   recap: ['总集篇', '總集篇', '总集', '總集', 'Recap'],
 }
 
-const server = createServer((request, response) => {
-  if (request.url === '/health') {
-    response.writeHead(200, { 'content-type': 'application/json' })
-    response.end(JSON.stringify({ ok: true, rooms: rooms.size }))
-    return
-  }
-  response.writeHead(404)
-  response.end()
-})
-const wss = new WebSocketServer({ server })
 const rooms = new Map()
 const clients = new Map()
+
+export async function loadAnimeSeed(seedPath = join(rootDir, 'public', 'anime-seed.json')) {
+  if (allAnime.length) return allAnime
+  allAnime = JSON.parse(await readFile(seedPath, 'utf8'))
+  return allAnime
+}
+
+export function roomCount() {
+  return rooms.size
+}
 
 function createDefaultSettings() {
   return {
@@ -192,7 +192,7 @@ function publicPlayers(room) {
 }
 
 function send(ws, message) {
-  if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message))
+  if (ws.readyState === undefined || ws.readyState === ws.OPEN) ws.send(JSON.stringify(message))
 }
 
 function findRoomFor(ws) {
@@ -478,31 +478,73 @@ function leave(ws) {
   broadcastRoom(room)
 }
 
-wss.on('connection', (ws) => {
-  send(ws, { type: 'connected' })
-  ws.on('message', (raw) => {
-    let payload
-    try {
-      payload = JSON.parse(raw.toString())
-    } catch {
-      send(ws, { type: 'error', message: '消息格式不正确。' })
+function handleRawMessage(ws, raw) {
+  let payload
+  try {
+    payload = JSON.parse(typeof raw === 'string' ? raw : raw.toString())
+  } catch {
+    send(ws, { type: 'error', message: '消息格式不正确。' })
+    return
+  }
+  const room = findRoomFor(ws)
+  if (payload.type === 'createRoom') createRoom(ws, payload)
+  else if (payload.type === 'joinRoom') joinRoom(ws, payload)
+  else if (payload.type === 'updateSettings' && room && requireHost(ws, room)) {
+    updateRoomSettings(room, payload)
+    broadcastRoom(room)
+  } else if (payload.type === 'startGame') startGame(ws)
+  else if (payload.type === 'answer') answer(ws, payload)
+  else if (payload.type === 'returnToLobby') returnToLobby(ws)
+  else if (payload.type === 'updateNickname') updateNickname(ws, payload)
+  else if (payload.type === 'leaveRoom') leave(ws)
+}
+
+export function createRoomWebSocketHandler() {
+  return {
+    onopen(ws) {
+      send(ws, { type: 'connected' })
+    },
+    onmessage(ws, message, isBinary) {
+      if (isBinary) return
+      handleRawMessage(ws, message)
+    },
+    onclose(ws) {
+      leave(ws)
+    },
+    onerror(ws, error) {
+      console.error('[Room WebSocket] error:', error)
+      leave(ws)
+    },
+  }
+}
+
+async function startLocalServer() {
+  await loadAnimeSeed()
+  const server = createServer((request, response) => {
+    if (request.url === '/health') {
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ ok: true, rooms: rooms.size }))
       return
     }
-    const room = findRoomFor(ws)
-    if (payload.type === 'createRoom') createRoom(ws, payload)
-    else if (payload.type === 'joinRoom') joinRoom(ws, payload)
-    else if (payload.type === 'updateSettings' && room && requireHost(ws, room)) {
-      updateRoomSettings(room, payload)
-      broadcastRoom(room)
-    } else if (payload.type === 'startGame') startGame(ws)
-    else if (payload.type === 'answer') answer(ws, payload)
-    else if (payload.type === 'returnToLobby') returnToLobby(ws)
-    else if (payload.type === 'updateNickname') updateNickname(ws, payload)
-    else if (payload.type === 'leaveRoom') leave(ws)
+    response.writeHead(404)
+    response.end()
   })
-  ws.on('close', () => leave(ws))
-})
+  const wss = new WebSocketServer({ server })
+  const handler = createRoomWebSocketHandler()
+  wss.on('connection', (ws) => {
+    handler.onopen(ws)
+    ws.on('message', (raw, isBinary) => handler.onmessage(ws, raw, isBinary))
+    ws.on('close', () => handler.onclose(ws))
+    ws.on('error', (error) => handler.onerror(ws, error))
+  })
+  server.listen(port, host, () => {
+    console.log(`Bangumi room server listening on ws://${host}:${port}`)
+  })
+}
 
-server.listen(port, host, () => {
-  console.log(`Bangumi room server listening on ws://${host}:${port}`)
-})
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  startLocalServer().catch((error) => {
+    console.error(error)
+    process.exit(1)
+  })
+}
