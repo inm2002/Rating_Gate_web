@@ -11,6 +11,7 @@
     "test:smoke": "node scripts/smoke-test.mjs",
     "test:multiplayer": "node scripts/multiplayer-smoke-test.mjs",
     "worker:deploy": "npm --prefix worker run deploy",
+    "worker:deploy:ci": "npm --prefix worker ci && npm --prefix worker run deploy",
     "worker:dev": "npm --prefix worker run dev",
     "worker:typecheck": "npm --prefix worker run typecheck",
     "preview": "vite preview"

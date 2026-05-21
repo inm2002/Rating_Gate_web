@@ -32,7 +32,10 @@ Cloudflare Pages 使用仓库根目录构建：
 Install command: npm ci
 Build command: npm ci && npm run build
 Output directory: dist
+Deploy command: 留空
 ```
+
+Pages 只负责部署前端静态资源，不应在 Pages 的 Deploy command 中执行 `npx wrangler deploy`。Worker 需要按下方步骤单独部署。
 
 若前端和 Worker 共用同一域名，Pages 环境变量通常无需设置。若需要显式指定联机服务地址，可设置：
 
@@ -51,6 +54,12 @@ npx wrangler login
 npx wrangler deploy
 ```
 
+也可以在仓库根目录执行：
+
+```bash
+npm run worker:deploy
+```
+
 `worker/wrangler.toml` 中的默认路由为：
 
 ```text
@@ -60,6 +69,30 @@ ratinggate.cn/ws*
 如果使用其他域名，需要同步修改 `worker/wrangler.toml` 中的 `routes` 配置。
 
 部署后，`/ws` 路径由 Worker 处理，其余页面路径继续由 Cloudflare Pages 处理。
+
+### 通过 Cloudflare 控制台单独部署 Worker
+
+如果使用 Cloudflare 的 Git 集成部署 Worker，应创建独立的 Worker 项目，并将项目根目录设置为：
+
+```text
+worker
+```
+
+推荐配置：
+
+```text
+Install command: npm ci
+Build command: npm run typecheck
+Deploy command: npm run deploy
+```
+
+如果无法设置 Worker 项目根目录，也可以在仓库根目录使用：
+
+```text
+Deploy command: npm run worker:deploy:ci
+```
+
+该方式需要在 Cloudflare 项目环境变量中配置有权限部署 Worker 和 Durable Objects 的 `CLOUDFLARE_API_TOKEN`。
 
 ## 上线验证
 
@@ -124,3 +157,11 @@ Worker 需要单独部署：
 cd worker
 npx wrangler deploy
 ```
+
+### Pages 构建日志出现 `Could not find Vite config file to modify`
+
+该错误通常表示在仓库根目录执行了 `npx wrangler deploy`，但 Worker 的 `wrangler.toml` 实际位于 `worker/` 子目录。处理方式：
+
+- Cloudflare Pages 的 Deploy command 留空。
+- Worker 单独部署，或在 `worker/` 目录运行 `npx wrangler deploy`。
+- 若必须从仓库根目录部署 Worker，使用 `npm run worker:deploy:ci`，不要直接使用 `npx wrangler deploy`。
