@@ -879,7 +879,7 @@ h1 {
 
 .toggle-grid input {
   position: absolute;
-  opacity: 0;
+  opacity: 0 !important;
   pointer-events: none;
 }
 
@@ -904,6 +904,11 @@ h1 {
   border-color: rgba(216, 95, 134, 0.34);
   background: rgba(216, 95, 134, 0.1);
   color: var(--accent-deep);
+}
+
+.toggle-grid input:disabled + span {
+  cursor: not-allowed;
+  opacity: 0.62;
 }
 
 .result-dialog {
@@ -1001,6 +1006,38 @@ h1 {
 
 .site-footer a:hover {
   text-decoration: underline;
+}
+
+.toast {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(360px, calc(100vw - 32px));
+  border: 1px solid rgba(216, 95, 134, 0.26);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--ink);
+  padding: 12px 12px 12px 14px;
+  box-shadow: 0 20px 54px rgba(27, 31, 42, 0.16);
+  font-size: 0.9rem;
+  font-weight: 750;
+}
+
+.toast button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface-soft);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
 }
 
 @media (max-width: 1080px) {

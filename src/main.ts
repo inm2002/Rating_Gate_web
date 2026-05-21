@@ -52,6 +52,8 @@ let appView: AppView = 'solo'
 let localRoom: LocalRoom | null = null
 let mode: Mode = 'classic'
 let roomMode: Mode = 'classic'
+let roomClassicRounds = 10
+let roomTimedSeconds = 90
 let phase: Phase = 'loading'
 let left: Anime | null = null
 let right: Anime | null = null
@@ -270,6 +272,11 @@ app.innerHTML = `
             </div>
             <p class="room-mode-note" id="room-mode-note">经典模式：全员同题作答，等待所有人完成后进入下一题。</p>
 
+            <label class="control-field">
+              <span id="room-length-label">比赛题数</span>
+              <input id="room-length-input" type="number" min="1" max="50" step="1" value="10" />
+            </label>
+
             <div class="room-preset-row" aria-label="房间筛选预设">
               <button type="button" data-room-preset="standard">标准</button>
               <button type="button" data-room-preset="akashi">赤石大王</button>
@@ -387,6 +394,11 @@ app.innerHTML = `
       </div>
     </div>
   </dialog>
+
+  <div id="toast" class="toast" hidden role="status" aria-live="polite">
+    <span id="toast-message"></span>
+    <button id="toast-close" type="button" aria-label="关闭提示">×</button>
+  </div>
 `
 
 const $ = <T extends HTMLElement>(id: string) => {
@@ -440,6 +452,8 @@ const byId = {
   roomModeClassic: $('room-mode-classic') as HTMLButtonElement,
   roomModeTimed: $('room-mode-timed') as HTMLButtonElement,
   roomModeNote: $('room-mode-note'),
+  roomLengthLabel: $('room-length-label'),
+  roomLengthInput: $('room-length-input') as HTMLInputElement,
   roomPresetButtons: [...document.querySelectorAll<HTMLButtonElement>('[data-room-preset]')],
   roomMinVotes: $('room-min-votes') as HTMLInputElement,
   roomMinVotesLabel: $('room-min-votes-label') as HTMLOutputElement,
@@ -454,6 +468,9 @@ const byId = {
   roomPlayerList: $('room-player-list'),
   roomStart: $('room-start') as HTMLButtonElement,
   leaveRoom: $('leave-room') as HTMLButtonElement,
+  toast: $('toast'),
+  toastMessage: $('toast-message'),
+  toastClose: $('toast-close') as HTMLButtonElement,
   roomExcludes: {
     guochan: $('room-exclude-guochan') as HTMLInputElement,
     movies: $('room-exclude-movies') as HTMLInputElement,
@@ -512,6 +529,22 @@ function setPrompt(text: string, tone: 'neutral' | 'good' | 'bad' = 'neutral') {
   byId.prompt.dataset.tone = tone
 }
 
+let toastTimer = 0
+
+function showToast(message: string) {
+  window.clearTimeout(toastTimer)
+  byId.toastMessage.textContent = message
+  byId.toast.hidden = false
+  toastTimer = window.setTimeout(() => {
+    byId.toast.hidden = true
+  }, 2600)
+}
+
+function closeToast() {
+  window.clearTimeout(toastTimer)
+  byId.toast.hidden = true
+}
+
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (char) => {
     const entities: Record<string, string> = {
@@ -564,9 +597,7 @@ function currentNickname() {
 function renderRoom() {
   byId.roomLobby.hidden = !localRoom
   renderRoomSettings()
-  byId.roomCodeInput.readOnly = !!localRoom
   if (!localRoom) {
-    byId.roomCodeInput.readOnly = false
     byId.roomCodeDisplay.value = '------'
     byId.roomMessage.textContent = '房间界面已就绪，下一步接入本地 WebSocket 服务。'
     return
@@ -629,11 +660,26 @@ function syncRoomSettings() {
   renderRoomSettings()
 }
 
+function syncRoomLength() {
+  const raw = Number.parseInt(byId.roomLengthInput.value, 10)
+  if (roomMode === 'classic') {
+    roomClassicRounds = Number.isFinite(raw) ? Math.max(1, Math.min(50, raw)) : 10
+  } else {
+    roomTimedSeconds = Number.isFinite(raw) ? Math.max(30, Math.min(600, raw)) : 90
+  }
+  renderRoomSettings()
+}
+
 function renderRoomSettings() {
   const roomPool = filterAnime(allAnime, roomSettings)
   byId.roomPool.textContent = `${roomPool.length} 部`
   byId.roomModeLabel.textContent = roomMode === 'classic' ? '经典同步' : '限时冲分'
-  byId.roomLength.textContent = roomMode === 'classic' ? '10 题' : '90 秒'
+  byId.roomLengthLabel.textContent = roomMode === 'classic' ? '比赛题数' : '比赛秒数'
+  byId.roomLengthInput.min = roomMode === 'classic' ? '1' : '30'
+  byId.roomLengthInput.max = roomMode === 'classic' ? '50' : '600'
+  byId.roomLengthInput.step = roomMode === 'classic' ? '1' : '10'
+  byId.roomLengthInput.value = String(roomMode === 'classic' ? roomClassicRounds : roomTimedSeconds)
+  byId.roomLength.textContent = roomMode === 'classic' ? `${roomClassicRounds} 题` : `${roomTimedSeconds} 秒`
   byId.roomModeClassic.setAttribute('aria-pressed', roomMode === 'classic' ? 'true' : 'false')
   byId.roomModeTimed.setAttribute('aria-pressed', roomMode === 'timed' ? 'true' : 'false')
   byId.roomModeNote.textContent =
@@ -647,6 +693,7 @@ function renderRoomSettings() {
   ;[
     byId.roomModeClassic,
     byId.roomModeTimed,
+    byId.roomLengthInput,
     byId.roomMinVotes,
     byId.roomScoreMin,
     byId.roomScoreMax,
@@ -702,9 +749,17 @@ async function copyRoomCode() {
   if (!localRoom) return
   byId.roomCodeDisplay.select()
   byId.roomCodeDisplay.setSelectionRange(0, localRoom.code.length)
-  await navigator.clipboard.writeText(localRoom.code)
-  byId.copyRoomCode.textContent = '已复制'
-  window.setTimeout(() => (byId.copyRoomCode.textContent = '复制'), 1200)
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(localRoom.code)
+    } else {
+      document.execCommand('copy')
+    }
+    showToast(`房间码 ${localRoom.code} 已复制`)
+  } catch {
+    document.execCommand('copy')
+    showToast('已选中房间码，可手动复制')
+  }
 }
 
 function card(side: Side) {
@@ -1035,6 +1090,7 @@ function bindEvents() {
   byId.joinRoom.addEventListener('click', joinLocalRoom)
   byId.leaveRoom.addEventListener('click', leaveLocalRoom)
   byId.copyRoomCode.addEventListener('click', copyRoomCode)
+  byId.toastClose.addEventListener('click', closeToast)
   byId.roomModeClassic.addEventListener('click', () => {
     roomMode = 'classic'
     renderRoomSettings()
@@ -1043,6 +1099,8 @@ function bindEvents() {
     roomMode = 'timed'
     renderRoomSettings()
   })
+  byId.roomLengthInput.addEventListener('change', syncRoomLength)
+  byId.roomLengthInput.addEventListener('input', syncRoomLength)
   ;[
     byId.roomMinVotes,
     byId.roomScoreMin,

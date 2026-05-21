@@ -68,9 +68,16 @@ try {
   const playerRow = await page.locator('#room-player-list').innerText()
   await page.locator('#copy-room-code').click()
   await page.waitForTimeout(100)
-  const copyRoomText = await page.locator('#copy-room-code').innerText()
+  const toastText = await page.locator('#toast').innerText()
+  await page.locator('#toast-close').click()
+  const toastClosed = await page.locator('#toast').isHidden()
+  await page.locator('#room-length-input').fill('12')
+  await page.locator('#room-length-input').dispatchEvent('change')
+  const classicLength = await page.locator('#room-length').innerText()
   await page.locator('#room-mode-timed').click()
   await page.waitForTimeout(100)
+  await page.locator('#room-length-input').fill('120')
+  await page.locator('#room-length-input').dispatchEvent('change')
   const roomModeNote = await page.locator('#room-mode-note').innerText()
   const roomLength = await page.locator('#room-length').innerText()
   await page.locator('[data-room-preset="akashi"]').click()
@@ -108,10 +115,15 @@ try {
   if (customPressed.some((value) => value !== 'false')) throw new Error('Custom filters should clear preset highlight')
   if (multiplayerPressed !== 'true' || !lobbyVisible) throw new Error('Multiplayer room UI did not open')
   if (!/^[A-Z2-9]{6}$/.test(roomCode)) throw new Error(`Unexpected room code: ${roomCode}`)
-  if (roomCodeReadonly === null || roomCodeInputReadonly === null) throw new Error('Room code should be read only after creation')
-  if (copyRoomText !== '已复制') throw new Error('Room code copy button did not respond')
+  if (roomCodeReadonly === null || roomCodeInputReadonly !== null) {
+    throw new Error('Generated room code should be read only while join input remains editable')
+  }
+  if (!toastText.includes(roomCode) || !toastClosed) throw new Error('Room code copy toast did not work')
   if (!playerRow.includes('测试玩家')) throw new Error('Created room did not show local player')
-  if (!roomModeNote.includes('各自连续答题') || roomLength !== '90 秒') throw new Error('Timed room mode did not update copy')
+  if (classicLength !== '12 题') throw new Error('Classic room length did not update')
+  if (!roomModeNote.includes('各自连续答题') || roomLength !== '120 秒') {
+    throw new Error('Timed room mode did not update copy or length')
+  }
   if (roomScoreMax !== '4.9' || roomPool === '0 部') throw new Error('Room preset settings did not apply')
   if (!readyVisible) throw new Error('Timed ready dialog did not open')
   if (timerBeforeStart !== '90s' || timerStillPaused !== '90s') {
