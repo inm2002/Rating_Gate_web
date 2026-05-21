@@ -1189,33 +1189,42 @@ h1 {
 
 .toast {
   position: fixed;
-  right: 22px;
-  bottom: 22px;
-  z-index: 20;
+  top: max(18px, env(safe-area-inset-top));
+  left: 50%;
+  z-index: 80;
   display: flex;
   align-items: center;
-  gap: 12px;
-  max-width: min(360px, calc(100vw - 32px));
+  justify-content: space-between;
+  gap: 18px;
+  width: min(520px, calc(100vw - 32px));
+  min-height: 56px;
   border: 1px solid rgba(216, 95, 134, 0.26);
-  border-radius: 10px;
+  border-radius: 14px;
   background: rgba(255, 255, 255, 0.96);
   color: var(--ink);
-  padding: 12px 12px 12px 14px;
-  box-shadow: 0 20px 54px rgba(27, 31, 42, 0.16);
-  font-size: 0.9rem;
-  font-weight: 750;
+  padding: 14px 14px 14px 18px;
+  box-shadow: 0 24px 72px rgba(27, 31, 42, 0.22);
+  font-size: 0.96rem;
+  font-weight: 800;
+  line-height: 1.45;
+  transform: translateX(-50%);
+}
+
+.toast[hidden] {
+  display: none;
 }
 
 .toast button {
+  flex: 0 0 auto;
   display: grid;
-  width: 26px;
-  height: 26px;
+  width: 32px;
+  height: 32px;
   place-items: center;
   border-radius: 50%;
   background: var(--surface-soft);
   color: var(--muted);
   cursor: pointer;
-  font-size: 1rem;
+  font-size: 1.12rem;
   line-height: 1;
 }
 
