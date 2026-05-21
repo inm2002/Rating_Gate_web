@@ -85,8 +85,10 @@ try {
   }
 
   await host.locator('#room-start').click()
-  await host.waitForSelector('#room-match:not([hidden])')
-  await guest.waitForSelector('#room-match:not([hidden])')
+  await host.waitForSelector('#room-battle:not([hidden])')
+  await guest.waitForSelector('#room-battle:not([hidden])')
+  await host.waitForSelector('#room-image-left[src]')
+  await guest.waitForSelector('#room-image-left[src]')
 
   const hostQuestion = [
     await host.locator('#room-title-left').innerText(),
@@ -103,13 +105,17 @@ try {
   await host.locator('#room-answer-left').click()
   await host.waitForSelector('#room-match-note:text("等待房间内所有玩家")')
   await guest.locator('#room-answer-right').click()
-  await host.waitForSelector('#room-status:text("本题结算")')
-  await guest.waitForSelector('#room-status:text("本题结算")')
-  await host.waitForSelector('#room-status:text("比赛结束")', { timeout: 4000 })
-  await guest.waitForSelector('#room-status:text("比赛结束")', { timeout: 4000 })
+  await host.waitForSelector('#room-battle-status:text("结算中")')
+  await guest.waitForSelector('#room-battle-status:text("结算中")')
+  await host.waitForSelector('#room-battle-status:text("已结束")', { timeout: 4000 })
+  await guest.waitForSelector('#room-battle-status:text("已结束")', { timeout: 4000 })
+  await host.waitForSelector('#room-result-dialog[open]')
+  await guest.waitForSelector('#room-result-dialog[open]')
 
-  const hostScoreRows = await host.locator('#room-player-list').innerText()
+  const hostScoreRows = await host.locator('#room-battle-player-list').innerText()
+  const rankText = await host.locator('#room-rank-list').innerText()
   if (!/\d+ 分/.test(hostScoreRows)) throw new Error(`Scoreboard did not render scores: ${hostScoreRows}`)
+  if (!rankText.includes('房主') || !rankText.includes('挑战者')) throw new Error(`Ranking did not render players: ${rankText}`)
   if (errors.length) throw new Error(`Browser errors:\n${errors.join('\n')}`)
 
   await browser.close()
