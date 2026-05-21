@@ -88,6 +88,11 @@ try {
   await page.locator('#score-min').fill('')
   await page.waitForTimeout(100)
   const soloScoreEmptyValue = await page.locator('#score-min').inputValue()
+  const totalBeforeTypingShortcut = await page.locator('#metric-total').innerText()
+  await page.locator('#score-min').type('1')
+  await page.waitForTimeout(150)
+  const totalAfterTypingShortcut = await page.locator('#metric-total').innerText()
+  await page.locator('#score-min').fill('')
   await page.locator('#score-min').type('7.')
   await page.waitForTimeout(100)
   const soloScoreDecimalPending = await page.locator('#score-min').inputValue()
@@ -95,6 +100,13 @@ try {
   await page.locator('#score-min').type('4.9')
   await page.waitForTimeout(100)
   const soloScoreTypedValue = await page.locator('#score-min').inputValue()
+  await page.locator('#restart').click()
+  await page.waitForTimeout(300)
+  await page.locator('#solo-view .stage').click()
+  const totalBeforeSoloShortcut = await page.locator('#metric-total').innerText()
+  await page.keyboard.press('1')
+  await page.waitForTimeout(500)
+  const totalAfterSoloShortcut = await page.locator('#metric-total').innerText()
   await page.locator('#view-multiplayer').click()
   await page.waitForSelector('#room-entry-state:text("联机已连接")')
   await page.waitForTimeout(200)
@@ -185,6 +197,9 @@ try {
   if (!footerText.includes('数据更新时间')) throw new Error('Footer did not include data update time')
   if (!footerText.includes('inm2002/Rating_Gate_web')) throw new Error('Footer did not include GitHub repository link')
   if (customPressed.some((value) => value !== 'false')) throw new Error('Custom filters should clear preset highlight')
+  if (totalBeforeTypingShortcut !== totalAfterTypingShortcut) {
+    throw new Error(`Typing 1 in score input should not answer: ${totalBeforeTypingShortcut} -> ${totalAfterTypingShortcut}`)
+  }
   if (soloScoreEmptyValue !== '' || soloScoreDecimalPending !== '7.' || soloScoreTypedValue !== '4.9') {
     throw new Error(
       `Solo score input should allow decimal editing: empty=${soloScoreEmptyValue}, pending=${soloScoreDecimalPending}, typed=${soloScoreTypedValue}`,
@@ -229,6 +244,9 @@ try {
     throw new Error(`Timed mode started before confirmation: ${timerBeforeStart} -> ${timerStillPaused}`)
   }
   if (timerText !== '89s') throw new Error(`Timed mode did not start after confirmation: ${timerText}`)
+  if (totalBeforeSoloShortcut !== '0' || totalAfterSoloShortcut !== '1') {
+    throw new Error(`Solo shortcut should answer outside inputs: ${totalBeforeSoloShortcut} -> ${totalAfterSoloShortcut}`)
+  }
   if (errors.length) throw new Error(`Browser errors:\n${errors.join('\n')}`)
 
   console.log(`Smoke test passed: ${poolCount}, answered=${totalAfterClick}, timer=${timerText}`)

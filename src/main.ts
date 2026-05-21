@@ -165,7 +165,7 @@ app.innerHTML = `
         <div class="stage-head">
           <div>
             <p class="prompt" id="prompt">数据加载中...</p>
-            <span class="round-note" id="round-note">胜者进入下一轮，左侧会显示上一轮胜者的评分。</span>
+            <span class="round-note" id="round-note">胜者进入下一轮，左侧会显示上一轮胜者的评分。可按 1 / 2 快速选择左右。</span>
           </div>
           <button class="ghost-button" id="restart" type="button">重新开始</button>
         </div>
@@ -1101,12 +1101,12 @@ function renderRoomMatch() {
         : classicWaiting
           ? '你已作答，等待房间内所有玩家完成后统一结算。'
           : room.mode === 'classic'
-            ? '所有人看到同一道题，全部作答后进入下一题。'
+            ? '所有人看到同一道题，全部作答后进入下一题。可按 1 / 2 快速选择左右。'
             : game.reveal?.correct === true
               ? '上一题答对，继续冲分。'
               : game.reveal?.correct === false
                 ? '上一题答错，下一题继续。'
-                : '每位玩家各自连续作答，只有总时间同步。'
+                : '每位玩家各自连续作答，只有总时间同步。可按 1 / 2 快速选择左右。'
   const pendingSelection: RemoteReveal | null = !reveal && game.selectedSide ? { selectedSide: game.selectedSide } : null
   const cardReveal = room.mode === 'classic' ? (reveal ?? pendingSelection) : null
   renderRoomSide('left', pair, cardReveal)
@@ -1494,7 +1494,7 @@ function renderStats() {
   byId.metricBest.textContent = String(Math.max(getBest(mode), stats.correct))
   byId.modeClassic.setAttribute('aria-pressed', mode === 'classic' ? 'true' : 'false')
   byId.modeTimed.setAttribute('aria-pressed', mode === 'timed' ? 'true' : 'false')
-  byId.roundNote.textContent = '胜者进入下一轮，左侧会显示上一轮胜者的评分。'
+  byId.roundNote.textContent = '胜者进入下一轮，左侧会显示上一轮胜者的评分。可按 1 / 2 快速选择左右。'
   byId.dataUpdated.textContent = dataUpdatedAt ? `数据更新时间 ${dataUpdatedAt}` : '数据更新时间 --'
   byId.presetButtons.forEach((button) => {
     const pressed = activePreset === button.dataset.preset
@@ -1704,6 +1704,34 @@ function commitScores() {
   restartGame()
 }
 
+function isTypingTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false
+  const control = target.closest<HTMLElement>('input, select, textarea, button, [contenteditable="true"]')
+  if (!control || control.closest('[hidden]')) return false
+  return Boolean(control.offsetWidth || control.offsetHeight || control.getClientRects().length)
+}
+
+function hasOpenDialog() {
+  return Boolean(document.querySelector('dialog[open]'))
+}
+
+function handleAnswerShortcut(event: KeyboardEvent) {
+  if (event.key !== '1' && event.key !== '2') return
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.isComposing) return
+  if (isTypingTarget(event.target) || hasOpenDialog()) return
+
+  const side: Side = event.key === '1' ? 'left' : 'right'
+  if (appView === 'solo' && phase === 'playing') {
+    event.preventDefault()
+    select(side)
+    return
+  }
+  if (appView === 'multiplayer' && remoteRoom?.status === 'question' && remoteGame?.pair) {
+    event.preventDefault()
+    sendRoomMessage({ type: 'answer', side })
+  }
+}
+
 function applyPreset(name: PresetName) {
   const presetSettings = applyPresetSettings(name)
   byId.minVotes.value = String(presetSettings.minVotes)
@@ -1838,10 +1866,7 @@ function bindEvents() {
   byId.presetButtons.forEach((button) => {
     button.addEventListener('click', () => applyPreset((button.dataset.preset ?? 'standard') as PresetName))
   })
-  window.addEventListener('keydown', (event) => {
-    if (event.key === '1') select('left')
-    if (event.key === '2') select('right')
-  })
+  window.addEventListener('keydown', handleAnswerShortcut)
 }
 
 async function boot() {

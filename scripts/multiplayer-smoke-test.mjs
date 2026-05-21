@@ -83,6 +83,15 @@ try {
   if (!hostPlayers.includes('挑战者') || !guestPlayers.includes('房主')) {
     throw new Error(`Players did not sync:\nHost: ${hostPlayers}\nGuest: ${guestPlayers}`)
   }
+  await host.locator('#room-score-min').fill('')
+  await host.locator('#room-score-min').type('1')
+  const lobbyStillVisible = await host.locator('#room-lobby').isVisible()
+  const battleStillHidden = await host.locator('#room-battle').isHidden()
+  if (!lobbyStillVisible || !battleStillHidden) throw new Error('Typing 1 in lobby settings should not answer or leave lobby')
+  await host.locator('#room-score-min').blur()
+  await host.locator('#room-length-input').fill('1')
+  await host.locator('#room-length-input').dispatchEvent('change')
+  await host.waitForSelector('#room-length:text("1 题")')
 
   await host.locator('#room-start').click()
   await host.waitForSelector('#room-battle:not([hidden])')
@@ -102,11 +111,11 @@ try {
     throw new Error(`Questions were not synchronized: ${hostQuestion.join(' / ')} vs ${guestQuestion.join(' / ')}`)
   }
 
-  await host.locator('#room-answer-left').click()
+  await host.keyboard.press('1')
   await host.waitForSelector('#room-match-note:text("等待房间内所有玩家")')
   const selectedClass = await host.locator('#room-answer-left').getAttribute('class')
-  if (!selectedClass.includes('is-selected')) throw new Error(`Selected answer was not highlighted: ${selectedClass}`)
-  await guest.locator('#room-answer-right').click()
+  if (!selectedClass.includes('is-selected')) throw new Error(`Keyboard selected answer was not highlighted: ${selectedClass}`)
+  await guest.keyboard.press('2')
   await host.waitForSelector('#room-battle-status:text("结算中")')
   await guest.waitForSelector('#room-battle-status:text("结算中")')
   await host.waitForSelector('#room-battle-status:text("已结束")', { timeout: 4000 })
