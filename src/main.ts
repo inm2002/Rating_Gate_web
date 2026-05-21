@@ -138,7 +138,7 @@ app.innerHTML = `
       <div class="brand">
         <span class="brand-mark" aria-hidden="true">鉴</span>
         <div>
-          <h1>目标是番组鉴分王</h1>
+          <h1>Rating;Gate</h1>
           <p>Bangumi 评分挑战</p>
         </div>
       </div>
@@ -1560,7 +1560,7 @@ function bindEvents() {
     restartGame()
   })
   byId.copyResult.addEventListener('click', async () => {
-    const text = `目标是番组鉴分王：${mode === 'timed' ? '限时' : '经典'}模式答对 ${stats.correct}/${stats.total}，最高连击 ${stats.bestStreak}`
+    const text = `Rating;Gate：${mode === 'timed' ? '限时' : '经典'}模式答对 ${stats.correct}/${stats.total}，最高连击 ${stats.bestStreak}`
     await navigator.clipboard.writeText(text)
     byId.copyResult.textContent = '已复制'
     window.setTimeout(() => (byId.copyResult.textContent = '复制战绩'), 1200)

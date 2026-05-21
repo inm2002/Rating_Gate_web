@@ -132,7 +132,7 @@ try {
 
   await browser.close()
 
-  if (title !== '目标是番组鉴分王') throw new Error(`Unexpected title: ${title}`)
+  if (title !== 'Rating;Gate') throw new Error(`Unexpected title: ${title}`)
   if (!ruleNote.includes('胜者进入下一轮')) throw new Error(`Missing rule note: ${ruleNote}`)
   if (standardPressed !== 'true') throw new Error('Standard preset was not highlighted initially')
   if (!/部$/.test(poolCount)) throw new Error(`Unexpected pool count: ${poolCount}`)
