@@ -115,6 +115,20 @@ try {
   await page.waitForTimeout(100)
   const roomScoreMax = await page.locator('#room-score-max').inputValue()
   const roomPool = await page.locator('#room-pool').innerText()
+  await page.locator('#room-year-min').fill('')
+  await page.waitForTimeout(250)
+  const roomYearEmptyValue = await page.locator('#room-year-min').inputValue()
+  await page.locator('#room-year-min').type('1998')
+  await page.waitForTimeout(250)
+  const roomYearTypedValue = await page.locator('#room-year-min').inputValue()
+  const roomPresetAfterYearTyping = await page
+    .locator('[data-room-preset]')
+    .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-pressed')))
+  await page.locator('[data-room-year-range="before2010"]').click()
+  await page.waitForTimeout(250)
+  const roomQuickYearMin = await page.locator('#room-year-min').inputValue()
+  const roomQuickYearMax = await page.locator('#room-year-max').inputValue()
+  const roomQuickYearPressed = await page.locator('[data-room-year-range="before2010"]').getAttribute('aria-pressed')
   await page.locator('#view-solo').click()
   await page.waitForTimeout(200)
   await page.locator('#mode-timed').click()
@@ -157,6 +171,15 @@ try {
     throw new Error('Timed room mode did not update copy or length')
   }
   if (roomScoreMax !== '4.9' || roomPool === '0 部') throw new Error('Room preset settings did not apply')
+  if (roomYearEmptyValue !== '' || roomYearTypedValue !== '1998') {
+    throw new Error(`Room year input should allow direct editing: empty=${roomYearEmptyValue}, typed=${roomYearTypedValue}`)
+  }
+  if (roomPresetAfterYearTyping.some((value) => value !== 'false')) {
+    throw new Error('Custom room year range should clear preset highlight')
+  }
+  if (roomQuickYearMin !== '1900' || roomQuickYearMax !== '2009' || roomQuickYearPressed !== 'true') {
+    throw new Error(`Room year shortcut failed: ${roomQuickYearMin}-${roomQuickYearMax}`)
+  }
   if (!readyVisible) throw new Error('Timed ready dialog did not open')
   if (timerBeforeStart !== '90s' || timerStillPaused !== '90s') {
     throw new Error(`Timed mode started before confirmation: ${timerBeforeStart} -> ${timerStillPaused}`)

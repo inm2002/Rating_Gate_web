@@ -26,6 +26,7 @@ import {
 
 type AppView = 'solo' | 'multiplayer'
 type Phase = 'loading' | 'ready' | 'playing' | 'reveal' | 'ended'
+type RoomYearRange = 'all' | 'before2010' | 'decade2010' | 'after2020'
 
 interface AnimeSeedMeta {
   generatedAt: string
@@ -94,6 +95,8 @@ interface RemoteGame {
 }
 
 const BEST_KEY = 'aniscore-arena-best-v1'
+const YEAR_MIN_LIMIT = 1900
+const YEAR_MAX_LIMIT = 2030
 const ROOM_WS_URL =
   import.meta.env.VITE_WS_URL ??
   (location.protocol === 'https:' ? `wss://${location.host}/ws` : 'ws://127.0.0.1:8787')
@@ -363,15 +366,23 @@ app.innerHTML = `
               </label>
             </div>
 
-            <div class="range-row">
-              <label class="control-field">
-                <span>起始年份</span>
-                <input id="room-year-min" type="number" min="1900" max="2030" value="1900" />
-              </label>
-              <label class="control-field">
-                <span>结束年份</span>
-                <input id="room-year-max" type="number" min="1900" max="2030" value="${new Date().getFullYear()}" />
-              </label>
+            <div class="year-filter">
+              <div class="range-row">
+                <label class="control-field">
+                  <span>起始年份</span>
+                  <input id="room-year-min" class="year-input" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" value="1900" autocomplete="off" />
+                </label>
+                <label class="control-field">
+                  <span>结束年份</span>
+                  <input id="room-year-max" class="year-input" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" value="${new Date().getFullYear()}" autocomplete="off" />
+                </label>
+              </div>
+              <div class="year-shortcuts" aria-label="年份快捷选择">
+                <button type="button" data-room-year-range="all">全量</button>
+                <button type="button" data-room-year-range="before2010">2010 前</button>
+                <button type="button" data-room-year-range="decade2010">2010-2019</button>
+                <button type="button" data-room-year-range="after2020">2020 后</button>
+              </div>
             </div>
 
             <label class="control-field">
@@ -598,6 +609,7 @@ const byId = {
   roomScoreMax: $('room-score-max') as HTMLInputElement,
   roomYearMin: $('room-year-min') as HTMLInputElement,
   roomYearMax: $('room-year-max') as HTMLInputElement,
+  roomYearButtons: [...document.querySelectorAll<HTMLButtonElement>('[data-room-year-range]')],
   roomRanking: $('room-ranking') as HTMLSelectElement,
   roomPool: $('room-pool'),
   roomLength: $('room-length'),
@@ -1097,12 +1109,55 @@ function showRoomResultDialog(room: RemoteRoom) {
   byId.roomResultDialog.showModal()
 }
 
-function setRoomControlsFromSettings(nextSettings: Settings) {
+function sanitizeYearInput(input: HTMLInputElement) {
+  const sanitized = input.value.replace(/\D/g, '').slice(0, 4)
+  if (input.value !== sanitized) input.value = sanitized
+  return sanitized
+}
+
+function isCompleteYear(value: string) {
+  return /^\d{4}$/.test(value)
+}
+
+function clampYear(value: number) {
+  return Math.max(YEAR_MIN_LIMIT, Math.min(YEAR_MAX_LIMIT, value))
+}
+
+function readRoomYear(input: HTMLInputElement, fallback: number) {
+  const value = Number.parseInt(input.value, 10)
+  return Number.isFinite(value) ? clampYear(value) : fallback
+}
+
+function renderRoomPresetState() {
+  byId.roomPresetButtons.forEach((button) => {
+    button.setAttribute('aria-pressed', activeRoomPreset === button.dataset.roomPreset ? 'true' : 'false')
+  })
+}
+
+function detectRoomYearRange(): RoomYearRange | null {
+  const currentYear = new Date().getFullYear()
+  if (roomSettings.yearMin === YEAR_MIN_LIMIT && roomSettings.yearMax === currentYear) return 'all'
+  if (roomSettings.yearMin === YEAR_MIN_LIMIT && roomSettings.yearMax === 2009) return 'before2010'
+  if (roomSettings.yearMin === 2010 && roomSettings.yearMax === 2019) return 'decade2010'
+  if (roomSettings.yearMin === 2020 && roomSettings.yearMax === currentYear) return 'after2020'
+  return null
+}
+
+function renderRoomYearShortcutState(activeRange = detectRoomYearRange()) {
+  byId.roomYearButtons.forEach((button) => {
+    button.setAttribute('aria-pressed', activeRange === button.dataset.roomYearRange ? 'true' : 'false')
+  })
+}
+
+function setRoomControlsFromSettings(nextSettings: Settings, options: { forceYears?: boolean } = {}) {
   byId.roomMinVotes.value = String(nextSettings.minVotes)
   byId.roomScoreMin.value = String(nextSettings.scoreMin)
   byId.roomScoreMax.value = String(nextSettings.scoreMax)
-  byId.roomYearMin.value = String(nextSettings.yearMin)
-  byId.roomYearMax.value = String(nextSettings.yearMax)
+  const editingYear = document.activeElement === byId.roomYearMin || document.activeElement === byId.roomYearMax
+  if (options.forceYears || !editingYear) {
+    byId.roomYearMin.value = String(nextSettings.yearMin)
+    byId.roomYearMax.value = String(nextSettings.yearMax)
+  }
   byId.roomRanking.value = nextSettings.ranking
   ;(Object.keys(byId.roomExcludes) as ExcludeKey[]).forEach((key) => {
     byId.roomExcludes[key].checked = nextSettings.excludes[key]
@@ -1116,8 +1171,8 @@ function syncRoomSettings() {
     minVotes: Number.parseInt(byId.roomMinVotes.value, 10),
     scoreMin: Number.isFinite(scoreMin) ? Math.max(0, Math.min(10, scoreMin)) : 0,
     scoreMax: Number.isFinite(scoreMax) ? Math.max(0, Math.min(10, scoreMax)) : 10,
-    yearMin: Number.parseInt(byId.roomYearMin.value, 10),
-    yearMax: Number.parseInt(byId.roomYearMax.value, 10),
+    yearMin: readRoomYear(byId.roomYearMin, roomSettings.yearMin),
+    yearMax: readRoomYear(byId.roomYearMax, roomSettings.yearMax),
     ranking: byId.roomRanking.value as RankingFilter,
     excludes: {
       guochan: byId.roomExcludes.guochan.checked,
@@ -1132,12 +1187,51 @@ function syncRoomSettings() {
   if (roomSettings.scoreMin > roomSettings.scoreMax) {
     ;[roomSettings.scoreMin, roomSettings.scoreMax] = [roomSettings.scoreMax, roomSettings.scoreMin]
   }
+  if (roomSettings.yearMin > roomSettings.yearMax) {
+    ;[roomSettings.yearMin, roomSettings.yearMax] = [roomSettings.yearMax, roomSettings.yearMin]
+  }
   byId.roomScoreMin.value = roomSettings.scoreMin.toFixed(1).replace('.0', '')
   byId.roomScoreMax.value = roomSettings.scoreMax.toFixed(1).replace('.0', '')
   byId.roomMinVotesLabel.textContent = String(roomSettings.minVotes)
   activeRoomPreset = detectPreset(roomSettings)
   renderRoomSettings()
   pushRoomSettings()
+}
+
+function commitRoomYears(options: { normalize?: boolean } = {}) {
+  const yearMin = readRoomYear(byId.roomYearMin, roomSettings.yearMin)
+  const yearMax = readRoomYear(byId.roomYearMax, roomSettings.yearMax)
+  const nextMin = Math.min(yearMin, yearMax)
+  const nextMax = Math.max(yearMin, yearMax)
+  if (options.normalize) {
+    byId.roomYearMin.value = String(nextMin)
+    byId.roomYearMax.value = String(nextMax)
+  }
+  syncRoomSettings()
+}
+
+function handleRoomYearInput(input: HTMLInputElement) {
+  sanitizeYearInput(input)
+  activeRoomPreset = null
+  renderRoomPresetState()
+  renderRoomYearShortcutState(null)
+  const minValue = byId.roomYearMin.value
+  const maxValue = byId.roomYearMax.value
+  if (isCompleteYear(minValue) && isCompleteYear(maxValue)) commitRoomYears()
+}
+
+function applyRoomYearRange(range: RoomYearRange) {
+  const currentYear = new Date().getFullYear()
+  const ranges: Record<RoomYearRange, [number, number]> = {
+    all: [YEAR_MIN_LIMIT, currentYear],
+    before2010: [YEAR_MIN_LIMIT, 2009],
+    decade2010: [2010, 2019],
+    after2020: [2020, currentYear],
+  }
+  const [yearMin, yearMax] = ranges[range]
+  byId.roomYearMin.value = String(yearMin)
+  byId.roomYearMax.value = String(yearMax)
+  commitRoomYears()
 }
 
 function syncRoomLength() {
@@ -1167,9 +1261,8 @@ function renderRoomSettings() {
     roomMode === 'classic'
       ? '经典模式：全员同题作答，等待所有人完成后进入下一题。'
       : '计时模式：玩家各自连续答题，只同步总时间，时间结束后统一结算。'
-  byId.roomPresetButtons.forEach((button) => {
-    button.setAttribute('aria-pressed', activeRoomPreset === button.dataset.roomPreset ? 'true' : 'false')
-  })
+  renderRoomPresetState()
+  renderRoomYearShortcutState()
   const canEdit = !localRoom || (localRoom.role === '房主' && (!remoteRoom || remoteRoom.status === 'lobby'))
   ;[
     byId.roomModeClassic,
@@ -1182,6 +1275,7 @@ function renderRoomSettings() {
     byId.roomYearMax,
     byId.roomRanking,
     ...byId.roomPresetButtons,
+    ...byId.roomYearButtons,
     ...Object.values(byId.roomExcludes),
   ].forEach((control) => {
     control.disabled = !canEdit
@@ -1190,7 +1284,7 @@ function renderRoomSettings() {
 
 function applyRoomPreset(name: PresetName) {
   roomSettings = applyPresetSettings(name)
-  setRoomControlsFromSettings(roomSettings)
+  setRoomControlsFromSettings(roomSettings, { forceYears: true })
   syncRoomSettings()
 }
 
@@ -1621,13 +1715,22 @@ function bindEvents() {
     byId.roomMinVotes,
     byId.roomScoreMin,
     byId.roomScoreMax,
-    byId.roomYearMin,
-    byId.roomYearMax,
     byId.roomRanking,
     ...Object.values(byId.roomExcludes),
   ].forEach((control) => {
     control.addEventListener('change', syncRoomSettings)
     control.addEventListener('input', syncRoomSettings)
+  })
+  ;[byId.roomYearMin, byId.roomYearMax].forEach((control) => {
+    control.addEventListener('input', () => handleRoomYearInput(control))
+    control.addEventListener('change', () => commitRoomYears({ normalize: true }))
+    control.addEventListener('blur', () => commitRoomYears({ normalize: true }))
+    control.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') control.blur()
+    })
+  })
+  byId.roomYearButtons.forEach((button) => {
+    button.addEventListener('click', () => applyRoomYearRange((button.dataset.roomYearRange ?? 'all') as RoomYearRange))
   })
   byId.roomPresetButtons.forEach((button) => {
     button.addEventListener('click', () => applyRoomPreset((button.dataset.roomPreset ?? 'standard') as PresetName))

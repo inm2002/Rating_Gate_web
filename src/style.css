@@ -1024,6 +1024,45 @@ h1 {
   accent-color: var(--accent);
 }
 
+.year-filter {
+  display: grid;
+  gap: 10px;
+}
+
+.year-input {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.year-shortcuts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.year-shortcuts button {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.76);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 780;
+  white-space: nowrap;
+}
+
+.year-shortcuts button:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.year-shortcuts button[aria-pressed='true'] {
+  border-color: rgba(216, 95, 134, 0.42);
+  background: rgba(216, 95, 134, 0.08);
+  color: var(--accent-deep);
+}
+
 .range-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1360,6 +1399,10 @@ h1 {
 
   .scoreboard,
   .range-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .year-shortcuts {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
