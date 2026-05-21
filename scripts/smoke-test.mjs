@@ -1,9 +1,37 @@
+import { spawn } from 'node:child_process'
 import { chromium } from 'playwright-core'
 import { createServer } from 'vite'
 
 const port = 5174
+const wsPort = 8790
 const url = `http://127.0.0.1:${port}/`
 const chromePath = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+
+process.env.VITE_WS_URL = `ws://127.0.0.1:${wsPort}`
+
+const wsServer = spawn(process.execPath, ['scripts/ws-room-server.mjs'], {
+  cwd: process.cwd(),
+  env: {
+    ...process.env,
+    BGM_WS_HOST: '127.0.0.1',
+    BGM_WS_PORT: String(wsPort),
+  },
+  stdio: ['ignore', 'pipe', 'pipe'],
+})
+
+const waitForWsServer = new Promise((resolve, reject) => {
+  const timeout = setTimeout(() => reject(new Error('WebSocket server did not start in time')), 7000)
+  wsServer.stdout.on('data', (chunk) => {
+    if (chunk.toString().includes('Bangumi room server listening')) {
+      clearTimeout(timeout)
+      resolve()
+    }
+  })
+  wsServer.stderr.on('data', (chunk) => console.error(chunk.toString()))
+  wsServer.on('exit', (code) => {
+    if (code !== null && code !== 0) reject(new Error(`WebSocket server exited with ${code}`))
+  })
+})
 
 const server = await createServer({
   logLevel: 'silent',
@@ -15,6 +43,7 @@ const server = await createServer({
 })
 
 try {
+  await waitForWsServer
   await server.listen()
 
   const browser = await chromium.launch({ executablePath: chromePath, headless: true })
@@ -57,9 +86,11 @@ try {
     .locator('[data-preset]')
     .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-pressed')))
   await page.locator('#view-multiplayer').click()
+  await page.waitForSelector('#room-entry-state:text("联机已连接")')
   await page.waitForTimeout(200)
   await page.locator('#player-name').fill('测试玩家')
   await page.locator('#create-room').click()
+  await page.waitForSelector('#room-lobby:not([hidden])')
   const multiplayerPressed = await page.locator('#view-multiplayer').getAttribute('aria-pressed')
   const lobbyVisible = await page.locator('#room-lobby').isVisible()
   const roomCode = await page.locator('#room-code-display').inputValue()
@@ -135,4 +166,5 @@ try {
   console.log(`Smoke test passed: ${poolCount}, answered=${totalAfterClick}, timer=${timerText}`)
 } finally {
   await server.close()
+  wsServer.kill()
 }

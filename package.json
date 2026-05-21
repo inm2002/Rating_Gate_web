@@ -6,13 +6,16 @@
   "scripts": {
     "data:seed": "node scripts/fetch-bangumi-seed.mjs",
     "dev": "vite",
+    "dev:ws": "node scripts/ws-room-server.mjs",
     "build": "tsc && vite build",
     "test:smoke": "node scripts/smoke-test.mjs",
+    "test:multiplayer": "node scripts/multiplayer-smoke-test.mjs",
     "preview": "vite preview"
   },
   "devDependencies": {
     "playwright-core": "^1.60.0",
     "typescript": "~6.0.2",
-    "vite": "^8.0.12"
+    "vite": "^8.0.12",
+    "ws": "^8.20.1"
   }
 }

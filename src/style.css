@@ -407,6 +407,94 @@ h1 {
   font-size: 0.84rem;
 }
 
+.room-match {
+  display: grid;
+  gap: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
+.room-arena {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px minmax(0, 1fr);
+  align-items: stretch;
+  gap: 10px;
+}
+
+.room-answer-card {
+  display: grid;
+  min-height: 150px;
+  align-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(245, 246, 248, 0.92)),
+    var(--surface);
+  color: var(--ink);
+  padding: 16px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
+}
+
+.room-answer-card:not(:disabled):hover {
+  border-color: rgba(216, 95, 134, 0.45);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.room-answer-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.78;
+}
+
+.room-answer-card span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.room-answer-card strong {
+  font-size: clamp(1rem, 1.8vw, 1.28rem);
+  line-height: 1.24;
+}
+
+.room-answer-card b {
+  color: var(--ink);
+  font-size: 1.32rem;
+}
+
+.room-answer-card.is-selected {
+  border-color: var(--accent);
+}
+
+.room-answer-card.is-correct,
+.room-answer-card.is-winner {
+  border-color: rgba(22, 131, 94, 0.62);
+  background:
+    linear-gradient(180deg, rgba(236, 249, 243, 0.92), rgba(255, 255, 255, 0.9)),
+    var(--surface);
+}
+
+.room-answer-card.is-wrong {
+  border-color: rgba(201, 68, 82, 0.62);
+  background:
+    linear-gradient(180deg, rgba(255, 239, 241, 0.92), rgba(255, 255, 255, 0.9)),
+    var(--surface);
+}
+
+.room-versus {
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
 .room-actions .primary-button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
@@ -1099,8 +1187,13 @@ h1 {
 
   .room-form-grid,
   .lobby-grid,
-  .room-code-bar {
+  .room-code-bar,
+  .room-arena {
     grid-template-columns: 1fr;
+  }
+
+  .room-versus {
+    min-height: 26px;
   }
 
   .versus {

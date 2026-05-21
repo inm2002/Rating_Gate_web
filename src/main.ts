@@ -39,7 +39,59 @@ interface LocalRoom {
   role: '房主' | '玩家'
 }
 
+type RoomStatus = 'lobby' | 'question' | 'reveal' | 'ended'
+
+type RemoteAnime = Omit<Anime, 'tags' | 'score'> & { score?: number }
+
+interface RemotePair {
+  left: RemoteAnime
+  right: RemoteAnime
+}
+
+interface RemotePlayer {
+  id: string
+  nickname: string
+  isHost: boolean
+  score: number
+  total: number
+  streak: number
+  answered: boolean
+}
+
+interface RemoteReveal {
+  pair?: RemotePair
+  answers?: Record<string, { selectedSide: Side; correct: boolean; winningSide: Side; diff: number }>
+  selectedSide?: Side
+  correct?: boolean
+  winningSide?: Side
+  diff?: number
+  reason?: string
+}
+
+interface RemoteRoom {
+  code: string
+  youId: string
+  hostId: string
+  status: RoomStatus
+  mode: Mode
+  length: number
+  settings: Settings
+  poolCount: number
+  players: RemotePlayer[]
+}
+
+interface RemoteGame {
+  status: RoomStatus
+  mode: Mode
+  round: number
+  length: number
+  endsAt: number | null
+  pair: RemotePair | null
+  reveal: RemoteReveal | null
+}
+
 const BEST_KEY = 'aniscore-arena-best-v1'
+const ROOM_WS_URL = import.meta.env.VITE_WS_URL ?? 'ws://127.0.0.1:8787'
 
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('Missing #app')
@@ -50,6 +102,10 @@ let pool: Anime[] = []
 let seen = new Set<number>()
 let appView: AppView = 'solo'
 let localRoom: LocalRoom | null = null
+let remoteRoom: RemoteRoom | null = null
+let remoteGame: RemoteGame | null = null
+let roomSocket: WebSocket | null = null
+let roomConnectPromise: Promise<boolean> | null = null
 let mode: Mode = 'classic'
 let roomMode: Mode = 'classic'
 let roomClassicRounds = 10
@@ -214,7 +270,7 @@ app.innerHTML = `
             <p class="eyebrow">多人模式</p>
             <h2>创建或加入房间</h2>
           </div>
-          <span class="room-state" id="room-entry-state">本地预览</span>
+          <span class="room-state" id="room-entry-state">联机未连接</span>
         </div>
 
         <div class="room-form-grid">
@@ -232,7 +288,7 @@ app.innerHTML = `
           <button class="primary-button" id="create-room" type="button">创建房间</button>
           <button class="ghost-button" id="join-room" type="button">加入房间</button>
         </div>
-        <p class="room-message" id="room-message">房间界面已就绪，下一步接入本地 WebSocket 服务。</p>
+        <p class="room-message" id="room-message">进入多人模式后会连接本地 WebSocket 房间服务。</p>
       </div>
 
       <div class="room-card room-lobby" id="room-lobby" hidden>
@@ -342,6 +398,27 @@ app.innerHTML = `
           </section>
         </div>
 
+        <section class="room-match" id="room-match" hidden>
+          <div class="panel-title compact-title">
+            <h3 id="room-match-title">比赛进行中</h3>
+            <span id="room-match-state">第 1 题</span>
+          </div>
+          <p class="room-mode-note" id="room-match-note">等待房主开始比赛。</p>
+          <div class="room-arena">
+            <button class="room-answer-card" id="room-answer-left" type="button">
+              <span id="room-meta-left"></span>
+              <strong id="room-title-left">左侧动画</strong>
+              <b id="room-score-left">?</b>
+            </button>
+            <span class="room-versus" aria-hidden="true">VS</span>
+            <button class="room-answer-card" id="room-answer-right" type="button">
+              <span id="room-meta-right"></span>
+              <strong id="room-title-right">右侧动画</strong>
+              <b id="room-score-right">?</b>
+            </button>
+          </div>
+        </section>
+
         <div class="room-actions">
           <button class="primary-button" id="room-start" type="button" disabled>开始比赛</button>
           <button class="ghost-button" id="leave-room" type="button">离开房间</button>
@@ -440,6 +517,7 @@ const byId = {
   ranking: $('ranking') as HTMLSelectElement,
   playerName: $('player-name') as HTMLInputElement,
   roomCodeInput: $('room-code-input') as HTMLInputElement,
+  roomEntryState: $('room-entry-state'),
   createRoom: $('create-room') as HTMLButtonElement,
   joinRoom: $('join-room') as HTMLButtonElement,
   roomMessage: $('room-message'),
@@ -466,6 +544,18 @@ const byId = {
   roomLength: $('room-length'),
   roomPlayerCount: $('room-player-count'),
   roomPlayerList: $('room-player-list'),
+  roomMatch: $('room-match'),
+  roomMatchTitle: $('room-match-title'),
+  roomMatchState: $('room-match-state'),
+  roomMatchNote: $('room-match-note'),
+  roomAnswerLeft: $('room-answer-left') as HTMLButtonElement,
+  roomAnswerRight: $('room-answer-right') as HTMLButtonElement,
+  roomMetaLeft: $('room-meta-left'),
+  roomMetaRight: $('room-meta-right'),
+  roomTitleLeft: $('room-title-left'),
+  roomTitleRight: $('room-title-right'),
+  roomScoreLeft: $('room-score-left'),
+  roomScoreRight: $('room-score-right'),
   roomStart: $('room-start') as HTMLButtonElement,
   leaveRoom: $('leave-room') as HTMLButtonElement,
   toast: $('toast'),
@@ -572,6 +662,7 @@ function switchView(nextView: AppView) {
   if (nextView === 'multiplayer') {
     stopTimer()
     if (byId.timedReadyDialog.open) byId.timedReadyDialog.close()
+    void connectRoomSocket()
   }
   renderAppView()
   renderRoom()
@@ -581,17 +672,135 @@ function normalizeRoomCode(value: string) {
   return value.replace(/[^a-z0-9]/gi, '').toUpperCase().slice(0, 6)
 }
 
-function generateRoomCode() {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-  let code = ''
-  for (let index = 0; index < 6; index += 1) {
-    code += alphabet[Math.floor(Math.random() * alphabet.length)]
-  }
-  return code
-}
-
 function currentNickname() {
   return byId.playerName.value.trim().slice(0, 16) || '鉴分员'
+}
+
+function isRoomSocketOpen() {
+  return roomSocket?.readyState === WebSocket.OPEN
+}
+
+function setRoomConnectionState(label: string, tone: 'neutral' | 'bad' = 'neutral') {
+  byId.roomEntryState.textContent = label
+  byId.roomEntryState.dataset.tone = tone
+}
+
+function handleRoomMessage(event: MessageEvent<string>) {
+  const message = JSON.parse(event.data) as
+    | { type: 'connected' }
+    | { type: 'roomState'; room: RemoteRoom }
+    | { type: 'gameState'; game: RemoteGame }
+    | { type: 'error'; message: string }
+
+  if (message.type === 'connected') {
+    setRoomConnectionState('联机已连接')
+    return
+  }
+  if (message.type === 'error') {
+    byId.roomMessage.textContent = message.message
+    showToast(message.message)
+    return
+  }
+  if (message.type === 'roomState') {
+    remoteRoom = message.room
+    const you = remoteRoom.players.find((player) => player.id === remoteRoom?.youId)
+    localRoom = {
+      code: remoteRoom.code,
+      nickname: you?.nickname ?? currentNickname(),
+      role: you?.isHost ? '房主' : '玩家',
+    }
+    roomMode = remoteRoom.mode
+    if (roomMode === 'classic') roomClassicRounds = remoteRoom.length
+    else roomTimedSeconds = remoteRoom.length
+    roomSettings = remoteRoom.settings
+    activeRoomPreset = detectPreset(roomSettings)
+    setRoomControlsFromSettings(roomSettings)
+    renderRoom()
+    return
+  }
+  remoteGame = message.game
+  renderRoom()
+}
+
+function connectRoomSocket() {
+  if (isRoomSocketOpen()) return Promise.resolve(true)
+  if (roomConnectPromise) return roomConnectPromise
+
+  setRoomConnectionState('正在连接')
+  roomSocket = new WebSocket(ROOM_WS_URL)
+  roomSocket.addEventListener('message', handleRoomMessage)
+  roomSocket.addEventListener('close', () => {
+    roomConnectPromise = null
+    setRoomConnectionState('联机未连接', 'bad')
+    if (remoteRoom) byId.roomMessage.textContent = '联机服务已断开，请确认 npm run dev:ws 正在运行。'
+  })
+  roomSocket.addEventListener('error', () => {
+    setRoomConnectionState('连接失败', 'bad')
+  })
+  roomConnectPromise = new Promise((resolve) => {
+    const timeout = window.setTimeout(() => {
+      setRoomConnectionState('连接超时', 'bad')
+      roomConnectPromise = null
+      resolve(false)
+    }, 2500)
+    roomSocket?.addEventListener(
+      'open',
+      () => {
+        window.clearTimeout(timeout)
+        setRoomConnectionState('联机已连接')
+        roomConnectPromise = null
+        resolve(true)
+      },
+      { once: true },
+    )
+    roomSocket?.addEventListener(
+      'error',
+      () => {
+        window.clearTimeout(timeout)
+        roomConnectPromise = null
+        resolve(false)
+      },
+      { once: true },
+    )
+  })
+  return roomConnectPromise
+}
+
+function sendRoomMessage(payload: Record<string, unknown>) {
+  if (!isRoomSocketOpen()) {
+    byId.roomMessage.textContent = '联机服务未连接，请先运行 npm run dev:ws。'
+    showToast('联机服务未连接')
+    return false
+  }
+  roomSocket?.send(JSON.stringify(payload))
+  return true
+}
+
+function roomLengthPayload() {
+  return {
+    length: roomMode === 'classic' ? roomClassicRounds : roomTimedSeconds,
+    classicRounds: roomClassicRounds,
+    timedSeconds: roomTimedSeconds,
+  }
+}
+
+function pushRoomSettings() {
+  if (!remoteRoom || localRoom?.role !== '房主' || remoteRoom.status !== 'lobby') return
+  sendRoomMessage({
+    type: 'updateSettings',
+    mode: roomMode,
+    settings: roomSettings,
+    ...roomLengthPayload(),
+  })
+}
+
+function titleOfRemote(anime: RemoteAnime) {
+  return anime.nameCn || anime.name
+}
+
+function yearOfRemote(anime: RemoteAnime) {
+  const year = Number.parseInt(anime.date.slice(0, 4), 10)
+  return Number.isFinite(year) ? year : 0
 }
 
 function renderRoom() {
@@ -599,23 +808,116 @@ function renderRoom() {
   renderRoomSettings()
   if (!localRoom) {
     byId.roomCodeDisplay.value = '------'
-    byId.roomMessage.textContent = '房间界面已就绪，下一步接入本地 WebSocket 服务。'
+    byId.roomMatch.hidden = true
+    byId.roomMessage.textContent = '进入多人模式后会连接本地 WebSocket 房间服务。'
     return
   }
   byId.roomCodeDisplay.value = localRoom.code
   byId.roomRole.textContent = localRoom.role
-  byId.roomStatus.textContent = localRoom.role === '房主' ? '等待玩家' : '已加入'
+  const room = remoteRoom
+  if (!room) return
+  const statusText: Record<RoomStatus, string> = {
+    lobby: localRoom.role === '房主' ? '等待玩家' : '已加入',
+    question: room.mode === 'classic' ? '同步作答中' : '限时冲分中',
+    reveal: '本题结算',
+    ended: '比赛结束',
+  }
+  byId.roomStatus.textContent = statusText[room.status]
   byId.roomMessage.textContent =
-    localRoom.role === '房主' ? `房间 ${localRoom.code} 已创建。` : `已加入房间 ${localRoom.code}。`
-  byId.roomPlayerCount.textContent = localRoom.role === '房主' ? '1/8' : '2/8'
-  const waitingRow =
     localRoom.role === '房主'
+      ? `房间 ${localRoom.code} 已创建，玩家可输入房间码加入。`
+      : `已加入房间 ${localRoom.code}，等待房主开始。`
+  byId.roomPlayerCount.textContent = `${room.players.length}/8`
+  const sortedPlayers = [...room.players].sort((a, b) => Number(b.isHost) - Number(a.isHost))
+  const playerRows = sortedPlayers
+    .map((player) => {
+      const isYou = player.id === room.youId
+      const role = player.isHost ? '房主' : '玩家'
+      const answerState =
+        room.status === 'question' && room.mode === 'classic' ? (player.answered ? ' · 已答' : ' · 思考中') : ''
+      return `<div class="player-row${isYou ? ' is-you' : ''}">
+        <span>${escapeHtml(player.nickname)}${isYou ? '（你）' : ''}</span>
+        <b>${role} · ${player.score} 分${answerState}</b>
+      </div>`
+    })
+    .join('')
+  const waitingRow =
+    room.status === 'lobby' && room.players.length < 2
       ? '<div class="player-row is-empty"><span>等待玩家加入</span><b>空位</b></div>'
-      : '<div class="player-row"><span>房主</span><b>0 分</b></div>'
-  byId.roomPlayerList.innerHTML = `
-    <div class="player-row is-you"><span>${escapeHtml(localRoom.nickname)}</span><b>${localRoom.role}</b></div>
-    ${waitingRow}
-  `
+      : ''
+  byId.roomPlayerList.innerHTML = `${playerRows}${waitingRow}`
+  byId.roomStart.disabled = localRoom.role !== '房主' || room.status !== 'lobby' || room.poolCount < 2
+  byId.roomPool.textContent = `${room.poolCount} 部`
+  renderRoomMatch()
+}
+
+function renderRoomSide(side: Side, pair: RemotePair | null, reveal: RemoteReveal | null) {
+  const anime = pair?.[side]
+  const meta = side === 'left' ? byId.roomMetaLeft : byId.roomMetaRight
+  const title = side === 'left' ? byId.roomTitleLeft : byId.roomTitleRight
+  const score = side === 'left' ? byId.roomScoreLeft : byId.roomScoreRight
+  const button = side === 'left' ? byId.roomAnswerLeft : byId.roomAnswerRight
+  button.className = 'room-answer-card'
+  if (!anime) {
+    meta.textContent = ''
+    title.textContent = '暂无题目'
+    score.textContent = '-'
+    return
+  }
+  meta.textContent = `${yearOfRemote(anime) || '未知'} · ${anime.platform || '动画'}`
+  title.textContent = titleOfRemote(anime)
+  score.textContent = typeof anime.score === 'number' ? anime.score.toFixed(1) : '?'
+  const revealWinner = reveal?.winningSide === side
+  const selected = reveal?.selectedSide === side
+  button.classList.toggle('is-selected', selected)
+  button.classList.toggle('is-winner', revealWinner)
+  button.classList.toggle('is-wrong', selected && reveal?.correct === false)
+  button.classList.toggle('is-correct', selected && reveal?.correct === true)
+}
+
+function renderRoomMatch() {
+  const room = remoteRoom
+  const game = remoteGame
+  const reveal =
+    game?.mode === 'classic' && game.reveal?.answers && remoteRoom
+      ? { ...game.reveal, ...game.reveal.answers[remoteRoom.youId] }
+      : (game?.reveal ?? null)
+  const pair = room?.mode === 'classic' && reveal?.pair ? reveal.pair : (game?.pair ?? null)
+  byId.roomMatch.hidden = !room || !game || room.status === 'lobby'
+  if (!room || !game) return
+
+  const you = room.players.find((player) => player.id === room.youId)
+  const youAnswered = Boolean(you?.answered)
+  const classicWaiting = room.mode === 'classic' && room.status === 'question' && youAnswered
+  const canAnswer = room.status === 'question' && !classicWaiting && Boolean(game.pair)
+  const progress =
+    room.mode === 'classic'
+      ? `第 ${Math.min(game.round, game.length)} / ${game.length} 题`
+      : game.endsAt
+        ? `剩余 ${Math.max(0, Math.ceil((game.endsAt - Date.now()) / 1000))} 秒`
+        : '限时冲分'
+
+  byId.roomMatchTitle.textContent = room.mode === 'classic' ? '经典同步赛' : '限时冲分赛'
+  byId.roomMatchState.textContent = room.status === 'ended' ? '比赛结束' : progress
+  byId.roomMatchNote.textContent =
+    room.status === 'ended'
+      ? '比赛结束，房主可以离开后重新创建房间。'
+      : room.status === 'reveal'
+        ? '本题已结算，稍后自动进入下一题。'
+        : classicWaiting
+          ? '你已作答，等待房间内所有玩家完成后统一结算。'
+          : room.mode === 'classic'
+            ? '所有人看到同一道题，全部作答后进入下一题。'
+            : game.reveal?.correct === true
+              ? '上一题答对，继续冲分。'
+              : game.reveal?.correct === false
+                ? '上一题答错，下一题继续。'
+                : '每位玩家各自连续作答，只有总时间同步。'
+  const cardReveal = room.mode === 'classic' ? reveal : null
+  renderRoomSide('left', pair, cardReveal)
+  renderRoomSide('right', pair, cardReveal)
+  byId.roomAnswerLeft.disabled = !canAnswer
+  byId.roomAnswerRight.disabled = !canAnswer
 }
 
 function setRoomControlsFromSettings(nextSettings: Settings) {
@@ -658,6 +960,7 @@ function syncRoomSettings() {
   byId.roomMinVotesLabel.textContent = String(roomSettings.minVotes)
   activeRoomPreset = detectPreset(roomSettings)
   renderRoomSettings()
+  pushRoomSettings()
 }
 
 function syncRoomLength() {
@@ -668,6 +971,7 @@ function syncRoomLength() {
     roomTimedSeconds = Number.isFinite(raw) ? Math.max(30, Math.min(600, raw)) : 90
   }
   renderRoomSettings()
+  pushRoomSettings()
 }
 
 function renderRoomSettings() {
@@ -689,7 +993,7 @@ function renderRoomSettings() {
   byId.roomPresetButtons.forEach((button) => {
     button.setAttribute('aria-pressed', activeRoomPreset === button.dataset.roomPreset ? 'true' : 'false')
   })
-  const canEdit = !localRoom || localRoom.role === '房主'
+  const canEdit = !localRoom || (localRoom.role === '房主' && (!remoteRoom || remoteRoom.status === 'lobby'))
   ;[
     byId.roomModeClassic,
     byId.roomModeTimed,
@@ -713,35 +1017,47 @@ function applyRoomPreset(name: PresetName) {
   syncRoomSettings()
 }
 
-function createLocalRoom() {
-  localRoom = {
-    code: generateRoomCode(),
-    nickname: currentNickname(),
-    role: '房主',
+async function createNetworkRoom() {
+  syncRoomLength()
+  syncRoomSettings()
+  const connected = await connectRoomSocket()
+  if (!connected) {
+    byId.roomMessage.textContent = '无法连接联机服务，请先运行 npm run dev:ws。'
+    return
   }
-  byId.roomCodeInput.value = localRoom.code
-  renderRoom()
+  sendRoomMessage({
+    type: 'createRoom',
+    nickname: currentNickname(),
+    mode: roomMode,
+    settings: roomSettings,
+    ...roomLengthPayload(),
+  })
 }
 
-function joinLocalRoom() {
+async function joinNetworkRoom() {
   const code = normalizeRoomCode(byId.roomCodeInput.value)
   if (code.length < 4) {
     localRoom = null
+    remoteRoom = null
+    remoteGame = null
     renderRoom()
     byId.roomMessage.textContent = '请输入至少 4 位房间码。'
     return
   }
   byId.roomCodeInput.value = code
-  localRoom = {
-    code,
-    nickname: currentNickname(),
-    role: '玩家',
+  const connected = await connectRoomSocket()
+  if (!connected) {
+    byId.roomMessage.textContent = '无法连接联机服务，请先运行 npm run dev:ws。'
+    return
   }
-  renderRoom()
+  sendRoomMessage({ type: 'joinRoom', nickname: currentNickname(), roomCode: code })
 }
 
-function leaveLocalRoom() {
+function leaveNetworkRoom() {
+  sendRoomMessage({ type: 'leaveRoom' })
   localRoom = null
+  remoteRoom = null
+  remoteGame = null
   renderRoom()
 }
 
@@ -1084,20 +1400,26 @@ function bindEvents() {
   byId.playerName.addEventListener('input', () => {
     if (!localRoom) return
     localRoom.nickname = currentNickname()
+    sendRoomMessage({ type: 'updateNickname', nickname: currentNickname() })
     renderRoom()
   })
-  byId.createRoom.addEventListener('click', createLocalRoom)
-  byId.joinRoom.addEventListener('click', joinLocalRoom)
-  byId.leaveRoom.addEventListener('click', leaveLocalRoom)
+  byId.createRoom.addEventListener('click', createNetworkRoom)
+  byId.joinRoom.addEventListener('click', joinNetworkRoom)
+  byId.leaveRoom.addEventListener('click', leaveNetworkRoom)
   byId.copyRoomCode.addEventListener('click', copyRoomCode)
   byId.toastClose.addEventListener('click', closeToast)
+  byId.roomStart.addEventListener('click', () => sendRoomMessage({ type: 'startGame' }))
+  byId.roomAnswerLeft.addEventListener('click', () => sendRoomMessage({ type: 'answer', side: 'left' }))
+  byId.roomAnswerRight.addEventListener('click', () => sendRoomMessage({ type: 'answer', side: 'right' }))
   byId.roomModeClassic.addEventListener('click', () => {
     roomMode = 'classic'
     renderRoomSettings()
+    pushRoomSettings()
   })
   byId.roomModeTimed.addEventListener('click', () => {
     roomMode = 'timed'
     renderRoomSettings()
+    pushRoomSettings()
   })
   byId.roomLengthInput.addEventListener('change', syncRoomLength)
   byId.roomLengthInput.addEventListener('input', syncRoomLength)
