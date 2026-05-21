@@ -1029,6 +1029,7 @@ h1 {
   gap: 10px;
 }
 
+.score-input,
 .year-input {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;

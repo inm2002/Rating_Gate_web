@@ -227,11 +227,11 @@ app.innerHTML = `
           <div class="range-row">
             <label class="control-field">
               <span>最低评分</span>
-              <input id="score-min" type="number" min="0" max="10" step="0.1" value="0" />
+              <input id="score-min" class="score-input" type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]?" maxlength="4" value="0" autocomplete="off" />
             </label>
             <label class="control-field">
               <span>最高评分</span>
-              <input id="score-max" type="number" min="0" max="10" step="0.1" value="10" />
+              <input id="score-max" class="score-input" type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]?" maxlength="4" value="10" autocomplete="off" />
             </label>
           </div>
 
@@ -358,11 +358,11 @@ app.innerHTML = `
             <div class="range-row">
               <label class="control-field">
                 <span>最低评分</span>
-                <input id="room-score-min" type="number" min="0" max="10" step="0.1" value="0" />
+                <input id="room-score-min" class="score-input" type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]?" maxlength="4" value="0" autocomplete="off" />
               </label>
               <label class="control-field">
                 <span>最高评分</span>
-                <input id="room-score-max" type="number" min="0" max="10" step="0.1" value="10" />
+                <input id="room-score-max" class="score-input" type="text" inputmode="decimal" pattern="[0-9]*[.]?[0-9]?" maxlength="4" value="10" autocomplete="off" />
               </label>
             </div>
 
@@ -681,6 +681,37 @@ function setBest(modeName: Mode, value: number) {
   const saved = raw ? (JSON.parse(raw) as Partial<Record<Mode, number>>) : {}
   saved[modeName] = Math.max(saved[modeName] ?? 0, value)
   localStorage.setItem(BEST_KEY, JSON.stringify(saved))
+}
+
+function formatScoreInput(value: number) {
+  return value.toFixed(1).replace('.0', '')
+}
+
+function sanitizeScoreInput(input: HTMLInputElement) {
+  let value = input.value.replace(/[^\d.]/g, '')
+  const firstDot = value.indexOf('.')
+  if (firstDot !== -1) {
+    value = `${value.slice(0, firstDot + 1)}${value.slice(firstDot + 1).replace(/\./g, '')}`
+  }
+  if (value.startsWith('.')) value = `0${value}`
+  const [integer = '', decimal] = value.split('.')
+  const trimmedInteger = integer.slice(0, 2)
+  value = decimal === undefined ? trimmedInteger : `${trimmedInteger}.${decimal.slice(0, 1)}`
+  if (input.value !== value) input.value = value
+  return value
+}
+
+function isCompleteScore(value: string) {
+  return /^(?:10(?:\.0)?|[0-9](?:\.[0-9])?)$/.test(value)
+}
+
+function clampScore(value: number) {
+  return Math.round(Math.max(0, Math.min(10, value)) * 10) / 10
+}
+
+function readScore(input: HTMLInputElement, fallback: number) {
+  const value = Number.parseFloat(input.value)
+  return Number.isFinite(value) ? clampScore(value) : fallback
 }
 
 function formatUpdatedAt(value: string) {
@@ -1149,10 +1180,13 @@ function renderRoomYearShortcutState(activeRange = detectRoomYearRange()) {
   })
 }
 
-function setRoomControlsFromSettings(nextSettings: Settings, options: { forceYears?: boolean } = {}) {
+function setRoomControlsFromSettings(nextSettings: Settings, options: { forceScores?: boolean; forceYears?: boolean } = {}) {
   byId.roomMinVotes.value = String(nextSettings.minVotes)
-  byId.roomScoreMin.value = String(nextSettings.scoreMin)
-  byId.roomScoreMax.value = String(nextSettings.scoreMax)
+  const editingScore = document.activeElement === byId.roomScoreMin || document.activeElement === byId.roomScoreMax
+  if (options.forceScores || !editingScore) {
+    byId.roomScoreMin.value = formatScoreInput(nextSettings.scoreMin)
+    byId.roomScoreMax.value = formatScoreInput(nextSettings.scoreMax)
+  }
   const editingYear = document.activeElement === byId.roomYearMin || document.activeElement === byId.roomYearMax
   if (options.forceYears || !editingYear) {
     byId.roomYearMin.value = String(nextSettings.yearMin)
@@ -1164,13 +1198,11 @@ function setRoomControlsFromSettings(nextSettings: Settings, options: { forceYea
   })
 }
 
-function syncRoomSettings() {
-  const scoreMin = Number.parseFloat(byId.roomScoreMin.value)
-  const scoreMax = Number.parseFloat(byId.roomScoreMax.value)
+function syncRoomSettings(options: { normalizeScores?: boolean } = {}) {
   roomSettings = {
     minVotes: Number.parseInt(byId.roomMinVotes.value, 10),
-    scoreMin: Number.isFinite(scoreMin) ? Math.max(0, Math.min(10, scoreMin)) : 0,
-    scoreMax: Number.isFinite(scoreMax) ? Math.max(0, Math.min(10, scoreMax)) : 10,
+    scoreMin: readScore(byId.roomScoreMin, roomSettings.scoreMin),
+    scoreMax: readScore(byId.roomScoreMax, roomSettings.scoreMax),
     yearMin: readRoomYear(byId.roomYearMin, roomSettings.yearMin),
     yearMax: readRoomYear(byId.roomYearMax, roomSettings.yearMax),
     ranking: byId.roomRanking.value as RankingFilter,
@@ -1190,12 +1222,27 @@ function syncRoomSettings() {
   if (roomSettings.yearMin > roomSettings.yearMax) {
     ;[roomSettings.yearMin, roomSettings.yearMax] = [roomSettings.yearMax, roomSettings.yearMin]
   }
-  byId.roomScoreMin.value = roomSettings.scoreMin.toFixed(1).replace('.0', '')
-  byId.roomScoreMax.value = roomSettings.scoreMax.toFixed(1).replace('.0', '')
+  if (options.normalizeScores) {
+    byId.roomScoreMin.value = formatScoreInput(roomSettings.scoreMin)
+    byId.roomScoreMax.value = formatScoreInput(roomSettings.scoreMax)
+  }
   byId.roomMinVotesLabel.textContent = String(roomSettings.minVotes)
   activeRoomPreset = detectPreset(roomSettings)
   renderRoomSettings()
   pushRoomSettings()
+}
+
+function handleRoomScoreInput(input: HTMLInputElement) {
+  const value = sanitizeScoreInput(input)
+  activeRoomPreset = null
+  renderRoomPresetState()
+  const minValue = byId.roomScoreMin.value
+  const maxValue = byId.roomScoreMax.value
+  if (isCompleteScore(value) && isCompleteScore(minValue) && isCompleteScore(maxValue)) syncRoomSettings()
+}
+
+function commitRoomScores() {
+  syncRoomSettings({ normalizeScores: true })
 }
 
 function commitRoomYears(options: { normalize?: boolean } = {}) {
@@ -1284,8 +1331,8 @@ function renderRoomSettings() {
 
 function applyRoomPreset(name: PresetName) {
   roomSettings = applyPresetSettings(name)
-  setRoomControlsFromSettings(roomSettings, { forceYears: true })
-  syncRoomSettings()
+  setRoomControlsFromSettings(roomSettings, { forceScores: true, forceYears: true })
+  syncRoomSettings({ normalizeScores: true })
 }
 
 async function createNetworkRoom() {
@@ -1605,13 +1652,11 @@ function endGame(reason: string) {
   byId.resultDialog.showModal()
 }
 
-function syncSettings() {
-  const scoreMin = Number.parseFloat(byId.scoreMin.value)
-  const scoreMax = Number.parseFloat(byId.scoreMax.value)
+function syncSettings(options: { normalizeScores?: boolean } = {}) {
   settings = {
     minVotes: Number.parseInt(byId.minVotes.value, 10),
-    scoreMin: Number.isFinite(scoreMin) ? Math.max(0, Math.min(10, scoreMin)) : 0,
-    scoreMax: Number.isFinite(scoreMax) ? Math.max(0, Math.min(10, scoreMax)) : 10,
+    scoreMin: readScore(byId.scoreMin, settings.scoreMin),
+    scoreMax: readScore(byId.scoreMax, settings.scoreMax),
     yearMin: Number.parseInt(byId.yearMin.value, 10),
     yearMax: Number.parseInt(byId.yearMax.value, 10),
     ranking: byId.ranking.value as RankingFilter,
@@ -1628,10 +1673,35 @@ function syncSettings() {
   if (settings.scoreMin > settings.scoreMax) {
     ;[settings.scoreMin, settings.scoreMax] = [settings.scoreMax, settings.scoreMin]
   }
-  byId.scoreMin.value = settings.scoreMin.toFixed(1).replace('.0', '')
-  byId.scoreMax.value = settings.scoreMax.toFixed(1).replace('.0', '')
+  if (options.normalizeScores) {
+    byId.scoreMin.value = formatScoreInput(settings.scoreMin)
+    byId.scoreMax.value = formatScoreInput(settings.scoreMax)
+  }
   byId.minVotesLabel.textContent = String(settings.minVotes)
   activePreset = detectPreset(settings)
+}
+
+function renderPresetState() {
+  byId.presetButtons.forEach((button) => {
+    button.setAttribute('aria-pressed', activePreset === button.dataset.preset ? 'true' : 'false')
+  })
+}
+
+function handleScoreInput(input: HTMLInputElement) {
+  const value = sanitizeScoreInput(input)
+  activePreset = null
+  renderPresetState()
+  const minValue = byId.scoreMin.value
+  const maxValue = byId.scoreMax.value
+  if (isCompleteScore(value) && isCompleteScore(minValue) && isCompleteScore(maxValue)) {
+    syncSettings()
+    renderStats()
+  }
+}
+
+function commitScores() {
+  syncSettings({ normalizeScores: true })
+  restartGame()
 }
 
 function applyPreset(name: PresetName) {
@@ -1645,7 +1715,7 @@ function applyPreset(name: PresetName) {
   ;(Object.keys(byId.excludes) as ExcludeKey[]).forEach((key) => {
     byId.excludes[key].checked = presetSettings.excludes[key]
   })
-  syncSettings()
+  syncSettings({ normalizeScores: true })
   restartGame()
 }
 
@@ -1713,13 +1783,19 @@ function bindEvents() {
   byId.roomLengthInput.addEventListener('input', syncRoomLength)
   ;[
     byId.roomMinVotes,
-    byId.roomScoreMin,
-    byId.roomScoreMax,
     byId.roomRanking,
     ...Object.values(byId.roomExcludes),
   ].forEach((control) => {
-    control.addEventListener('change', syncRoomSettings)
-    control.addEventListener('input', syncRoomSettings)
+    control.addEventListener('change', () => syncRoomSettings())
+    control.addEventListener('input', () => syncRoomSettings())
+  })
+  ;[byId.roomScoreMin, byId.roomScoreMax].forEach((control) => {
+    control.addEventListener('input', () => handleRoomScoreInput(control))
+    control.addEventListener('change', commitRoomScores)
+    control.addEventListener('blur', commitRoomScores)
+    control.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') control.blur()
+    })
   })
   ;[byId.roomYearMin, byId.roomYearMax].forEach((control) => {
     control.addEventListener('input', () => handleRoomYearInput(control))
@@ -1737,8 +1813,6 @@ function bindEvents() {
   })
   ;[
     byId.minVotes,
-    byId.scoreMin,
-    byId.scoreMax,
     byId.yearMin,
     byId.yearMax,
     byId.ranking,
@@ -1751,6 +1825,14 @@ function bindEvents() {
     control.addEventListener('input', () => {
       syncSettings()
       renderStats()
+    })
+  })
+  ;[byId.scoreMin, byId.scoreMax].forEach((control) => {
+    control.addEventListener('input', () => handleScoreInput(control))
+    control.addEventListener('change', commitScores)
+    control.addEventListener('blur', commitScores)
+    control.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') control.blur()
     })
   })
   byId.presetButtons.forEach((button) => {

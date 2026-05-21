@@ -85,6 +85,16 @@ try {
   const customPressed = await page
     .locator('[data-preset]')
     .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-pressed')))
+  await page.locator('#score-min').fill('')
+  await page.waitForTimeout(100)
+  const soloScoreEmptyValue = await page.locator('#score-min').inputValue()
+  await page.locator('#score-min').type('7.')
+  await page.waitForTimeout(100)
+  const soloScoreDecimalPending = await page.locator('#score-min').inputValue()
+  await page.locator('#score-min').fill('')
+  await page.locator('#score-min').type('4.9')
+  await page.waitForTimeout(100)
+  const soloScoreTypedValue = await page.locator('#score-min').inputValue()
   await page.locator('#view-multiplayer').click()
   await page.waitForSelector('#room-entry-state:text("联机已连接")')
   await page.waitForTimeout(200)
@@ -115,6 +125,22 @@ try {
   await page.waitForTimeout(100)
   const roomScoreMax = await page.locator('#room-score-max').inputValue()
   const roomPool = await page.locator('#room-pool').innerText()
+  await page.locator('#room-score-min').fill('')
+  await page.waitForTimeout(250)
+  const roomScoreEmptyValue = await page.locator('#room-score-min').inputValue()
+  await page.locator('#room-score-min').type('7.')
+  await page.waitForTimeout(250)
+  const roomScoreDecimalPending = await page.locator('#room-score-min').inputValue()
+  await page.locator('#room-score-min').fill('')
+  await page.locator('#room-score-min').type('4.9')
+  await page.locator('#room-score-max').fill('')
+  await page.locator('#room-score-max').type('7.5')
+  await page.waitForTimeout(250)
+  const roomScoreTypedMin = await page.locator('#room-score-min').inputValue()
+  const roomScoreTypedMax = await page.locator('#room-score-max').inputValue()
+  const roomPresetAfterScoreTyping = await page
+    .locator('[data-room-preset]')
+    .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-pressed')))
   await page.locator('#room-year-min').fill('')
   await page.waitForTimeout(250)
   const roomYearEmptyValue = await page.locator('#room-year-min').inputValue()
@@ -159,6 +185,11 @@ try {
   if (!footerText.includes('数据更新时间')) throw new Error('Footer did not include data update time')
   if (!footerText.includes('inm2002/Rating_Gate_web')) throw new Error('Footer did not include GitHub repository link')
   if (customPressed.some((value) => value !== 'false')) throw new Error('Custom filters should clear preset highlight')
+  if (soloScoreEmptyValue !== '' || soloScoreDecimalPending !== '7.' || soloScoreTypedValue !== '4.9') {
+    throw new Error(
+      `Solo score input should allow decimal editing: empty=${soloScoreEmptyValue}, pending=${soloScoreDecimalPending}, typed=${soloScoreTypedValue}`,
+    )
+  }
   if (multiplayerPressed !== 'true' || !lobbyVisible) throw new Error('Multiplayer room UI did not open')
   if (!/^[A-Z2-9]{6}$/.test(roomCode)) throw new Error(`Unexpected room code: ${roomCode}`)
   if (roomCodeReadonly === null || roomCodeInputReadonly !== null) {
@@ -171,6 +202,19 @@ try {
     throw new Error('Timed room mode did not update copy or length')
   }
   if (roomScoreMax !== '4.9' || roomPool === '0 部') throw new Error('Room preset settings did not apply')
+  if (
+    roomScoreEmptyValue !== '' ||
+    roomScoreDecimalPending !== '7.' ||
+    roomScoreTypedMin !== '4.9' ||
+    roomScoreTypedMax !== '7.5'
+  ) {
+    throw new Error(
+      `Room score input should allow decimal editing: empty=${roomScoreEmptyValue}, pending=${roomScoreDecimalPending}, min=${roomScoreTypedMin}, max=${roomScoreTypedMax}`,
+    )
+  }
+  if (roomPresetAfterScoreTyping.some((value) => value !== 'false')) {
+    throw new Error('Custom room score range should clear preset highlight')
+  }
   if (roomYearEmptyValue !== '' || roomYearTypedValue !== '1998') {
     throw new Error(`Room year input should allow direct editing: empty=${roomYearEmptyValue}, typed=${roomYearTypedValue}`)
   }
