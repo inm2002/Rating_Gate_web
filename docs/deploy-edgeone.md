@@ -8,7 +8,7 @@
 GitHub 仓库
   -> EdgeOne Pages 自动构建
   -> dist 静态前端
-  -> node-functions/websocket.js 提供 /ws 联机服务
+  -> cloud-functions/ws.js 提供 /ws 联机服务
 ```
 
 生产环境未配置 `VITE_WS_URL` 时，前端默认连接当前域名下的 `wss://<host>/ws`。本地开发环境默认连接 `ws://127.0.0.1:8787`。
@@ -94,11 +94,11 @@ EdgeOne Pages 默认域名可用于快速验证。若后续绑定自有域名，
 
 ### 本地能联机，云端不能联机
 
-优先检查 EdgeOne Pages 是否识别了 `node-functions/websocket.js`。若项目配置了自定义根目录，需要确保 `node-functions` 位于部署根目录下。
+优先检查 EdgeOne Pages 是否识别了 `cloud-functions/ws.js`。若项目配置了自定义根目录，需要确保 `cloud-functions` 位于部署根目录下。
 
 ### 修改联机服务后本地没有生效
 
-Vite 只会热更新前端。修改 `scripts/ws-room-server.mjs` 或 `node-functions/websocket.js` 后，需要重启本地房间服务：
+Vite 只会热更新前端。修改 `scripts/ws-room-server.mjs` 或云函数入口后，需要重启本地房间服务：
 
 ```bash
 npm run dev:ws
