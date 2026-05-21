@@ -1,77 +1,79 @@
-# EdgeOne Pages 部署指南
+# Cloudflare 部署指南
 
-本文档说明如何将项目部署到 EdgeOne Pages，并启用多人联机所需的 WebSocket 房间服务。
+EdgeOne 部署方案已弃用。当前部署方案使用 Cloudflare Pages 托管前端，并使用 Cloudflare Workers + Durable Objects 提供多人联机服务。
 
 ## 架构
 
 ```text
-GitHub 仓库
-  -> EdgeOne Pages 自动构建
-  -> dist 静态前端
-  -> cloud-functions/ws.js 提供 /ws 联机服务
+ratinggate.cn
+  /      -> Cloudflare Pages 前端
+  /ws*   -> Cloudflare Worker
+            -> Durable Object 内存房间状态
 ```
 
-生产环境未配置 `VITE_WS_URL` 时，前端默认连接当前域名下的 `wss://<host>/ws`。本地开发环境默认连接 `ws://127.0.0.1:8787`。
+生产环境未配置 `VITE_WS_URL` 时，前端默认连接当前域名下的 `wss://<host>/ws`。因此 `https://ratinggate.cn` 会自动连接 `wss://ratinggate.cn/ws`。
 
-## 部署前检查
+## 计量优化策略
 
-```bash
-npm install
-npm run build
-npm run test:smoke
-npm run test:multiplayer
-```
+- 服务端不做逐秒倒计时广播。
+- 限时模式开始时只广播 `startAt` 和 `durationMs`。
+- 前端根据 `startAt + durationMs` 本地渲染倒计时。
+- 房间状态保存在 Durable Object 内存中，不写入持久化存储。
+- 不维护服务器端持久排行榜，只在当局结算时广播房间内排名。
+- 房间无人后立即清理内存状态和计时器。
+- 经典模式只在玩家作答、结算、进入下一题等状态变化时广播。
+- 限时模式只在玩家作答和比赛结束时广播。
 
-本地联机开发需要同时运行：
+## 前端 Pages 部署
 
-```bash
-npm run dev
-npm run dev:ws
-```
-
-## 推送到 GitHub
-
-首次配置远端仓库：
-
-```bash
-git remote add origin <GitHub 仓库地址>
-git push -u origin master
-```
-
-后续更新：
-
-```bash
-git push
-```
-
-## EdgeOne Pages 配置
-
-1. 在 EdgeOne Pages 控制台新建 Pages 项目。
-2. 选择从 GitHub 导入仓库。
-3. 使用以下构建配置：
+Cloudflare Pages 使用仓库根目录构建：
 
 ```text
-Framework preset: Vite
 Install command: npm ci
 Build command: npm ci && npm run build
 Output directory: dist
 ```
 
-4. 环境变量通常无需配置。生产环境会默认使用：
+若前端和 Worker 共用 `ratinggate.cn`，Pages 环境变量通常无需设置。若已经配置过旧的 `VITE_WS_URL`，需要删除或改为：
 
 ```text
-wss://<Pages 域名>/ws
+VITE_WS_URL=wss://ratinggate.cn/ws
 ```
 
-如需显式指定联机服务地址，可添加：
+## Worker 部署
+
+Worker 代码位于 `worker/`：
+
+```bash
+cd worker
+npm install
+npx wrangler login
+npx wrangler deploy
+```
+
+`worker/wrangler.toml` 已配置路由：
 
 ```text
-VITE_WS_URL=wss://<Pages 域名>/ws
+ratinggate.cn/ws*
 ```
 
-5. 部署完成后访问 Pages 提供的域名。
+部署后，Cloudflare 会让 `https://ratinggate.cn/ws` 进入 Worker，其余页面路径继续由 Pages 处理。
 
 ## 上线验证
+
+普通浏览器访问：
+
+```text
+https://ratinggate.cn/ws
+```
+
+应返回类似：
+
+```json
+{"ok":true,"rooms":0,"endpoint":"/ws","storage":"memory"}
+```
+
+随后验证页面功能：
 
 - 首页可以正常打开
 - 单人挑战可以加载题库并答题
@@ -82,24 +84,41 @@ VITE_WS_URL=wss://<Pages 域名>/ws
 - 双方作答后出现排名弹窗
 - 点击“回到大厅”后双方同步回到大厅
 
-## 备案说明
+## 本地开发
 
-EdgeOne Pages 默认域名可用于快速验证。若后续绑定自有域名，并希望使用中国大陆加速或大陆节点，通常需要先完成 ICP 备案。
+前端：
 
-## 常见问题
+```bash
+npm run dev
+```
 
-### 多人模式一直显示联机未连接
-
-检查部署后的 `/ws` 路径是否可访问。普通浏览器打开 `https://<域名>/ws` 时，应返回 JSON 或提示需要 WebSocket 升级，而不是 404。
-
-### 本地能联机，云端不能联机
-
-优先检查 EdgeOne Pages 是否识别了 `cloud-functions/ws.js`。若项目配置了自定义根目录，需要确保 `cloud-functions` 位于部署根目录下。
-
-### 修改联机服务后本地没有生效
-
-Vite 只会热更新前端。修改 `scripts/ws-room-server.mjs` 或云函数入口后，需要重启本地房间服务：
+本地 WebSocket 服务：
 
 ```bash
 npm run dev:ws
+```
+
+本地模式仍使用 `ws://127.0.0.1:8787`，便于不依赖 Cloudflare 调试前端和房间协议。
+
+## 常见问题
+
+### 多人模式仍提示无法连接联机服务
+
+检查 Pages 环境变量是否仍保留旧的 `VITE_WS_URL`。同域名方案下可删除该变量，或设置为 `wss://ratinggate.cn/ws`。
+
+### `/ws` 返回 Pages 页面或 404
+
+检查 Worker route 是否生效。路由应为：
+
+```text
+ratinggate.cn/ws*
+```
+
+### 修改 Worker 后没有生效
+
+Worker 需要单独部署：
+
+```bash
+cd worker
+npx wrangler deploy
 ```

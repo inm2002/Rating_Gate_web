@@ -26,7 +26,7 @@
 - 前端：Vite + TypeScript
 - 单人核心逻辑：`src/game-core.ts`
 - 本地 WebSocket 房间服务：`scripts/ws-room-server.mjs`
-- EdgeOne Pages WebSocket 函数入口：`cloud-functions/ws.js`
+- Cloudflare Worker + Durable Object 联机服务：`worker/src/index.ts`
 - 题库数据：`public/anime-seed.json`
 
 ## 本地开发
@@ -81,6 +81,6 @@ npm run test:multiplayer
 
 ## 部署
 
-面向中国大陆用户的免费部署方案可以使用 GitHub 托管源码、EdgeOne Pages 托管前端，并通过 `cloud-functions/ws.js` 提供实时房间服务。
+部署方案使用 Cloudflare Pages 托管前端，并通过 Cloudflare Workers + Durable Objects 提供 `ratinggate.cn/ws` 实时房间服务。前端页面和多人联机共用 `ratinggate.cn`。
 
 部署步骤见 [docs/deploy-edgeone.md](docs/deploy-edgeone.md)。

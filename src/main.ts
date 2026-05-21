@@ -85,6 +85,8 @@ interface RemoteGame {
   mode: Mode
   round: number
   length: number
+  startAt: number | null
+  durationMs: number | null
   endsAt: number | null
   pair: RemotePair | null
   selectedSide: Side | null
@@ -110,6 +112,7 @@ let remoteGame: RemoteGame | null = null
 let roomSocket: WebSocket | null = null
 let roomConnectPromise: Promise<boolean> | null = null
 let roomResultShownKey = ''
+let roomClockTimer = 0
 let mode: Mode = 'classic'
 let roomMode: Mode = 'classic'
 let roomClassicRounds = 10
@@ -777,6 +780,7 @@ function handleRoomMessage(event: MessageEvent<string>) {
     remoteRoom = message.room
     if (remoteRoom.status === 'lobby') {
       remoteGame = null
+      window.clearInterval(roomClockTimer)
       if (byId.roomResultDialog.open) byId.roomResultDialog.close()
     }
     const you = remoteRoom.players.find((player) => player.id === remoteRoom?.youId)
@@ -796,6 +800,7 @@ function handleRoomMessage(event: MessageEvent<string>) {
   }
   remoteGame = message.game
   renderRoom()
+  syncRoomClock()
 }
 
 function connectRoomSocket() {
@@ -850,6 +855,14 @@ function sendRoomMessage(payload: Record<string, unknown>) {
   }
   roomSocket?.send(JSON.stringify(payload))
   return true
+}
+
+function syncRoomClock() {
+  window.clearInterval(roomClockTimer)
+  if (remoteGame?.mode !== 'timed' || remoteGame.status !== 'question') return
+  roomClockTimer = window.setInterval(() => {
+    renderRoomMatch()
+  }, 1000)
 }
 
 function roomLengthPayload() {
@@ -1019,11 +1032,13 @@ function renderRoomMatch() {
   const youAnswered = Boolean(you?.answered)
   const classicWaiting = room.mode === 'classic' && room.status === 'question' && youAnswered
   const canAnswer = room.status === 'question' && !classicWaiting && Boolean(game.pair)
+  const timedEndsAt =
+    game.startAt && game.durationMs ? game.startAt + game.durationMs : game.endsAt
   const progress =
     room.mode === 'classic'
       ? `第 ${Math.min(game.round, game.length)} / ${game.length} 题`
-      : game.endsAt
-        ? `剩余 ${Math.max(0, Math.ceil((game.endsAt - Date.now()) / 1000))} 秒`
+      : timedEndsAt
+        ? `剩余 ${Math.max(0, Math.ceil((timedEndsAt - Date.now()) / 1000))} 秒`
         : '限时冲分'
 
   byId.roomMatchTitle.textContent = room.mode === 'classic' ? '经典同步赛' : '限时冲分赛'
@@ -1219,6 +1234,7 @@ async function joinNetworkRoom() {
 
 function leaveNetworkRoom() {
   sendRoomMessage({ type: 'leaveRoom' })
+  window.clearInterval(roomClockTimer)
   localRoom = null
   remoteRoom = null
   remoteGame = null

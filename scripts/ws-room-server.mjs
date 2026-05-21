@@ -226,6 +226,8 @@ function gamePayload(room, playerIdForClient) {
     mode: room.mode,
     round: room.round,
     length: room.mode === 'timed' ? room.timedSeconds : room.classicRounds,
+    startAt: room.startAt,
+    durationMs: room.durationMs,
     endsAt: room.endsAt,
     pair: publicPair(pair, reveal && room.mode === 'classic'),
     selectedSide,
@@ -296,6 +298,8 @@ function createRoom(ws, payload) {
     pair: null,
     pool: [],
     reveal: null,
+    startAt: null,
+    durationMs: null,
     endsAt: null,
     timer: null,
     advanceTimer: null,
@@ -346,10 +350,14 @@ function startGame(ws) {
   clearTimeout(room.timer)
   clearTimeout(room.advanceTimer)
   if (room.mode === 'timed') {
-    room.endsAt = Date.now() + room.timedSeconds * 1000
+    room.startAt = Date.now()
+    room.durationMs = room.timedSeconds * 1000
+    room.endsAt = room.startAt + room.durationMs
     for (const player of room.players.values()) player.pair = pickPair(room.pool)
-    room.timer = setTimeout(() => endRoom(room, '时间到'), room.timedSeconds * 1000)
+    room.timer = setTimeout(() => endRoom(room, '时间到'), room.durationMs)
   } else {
+    room.startAt = null
+    room.durationMs = null
     room.endsAt = null
     room.pair = pickPair(room.pool)
   }
@@ -393,6 +401,8 @@ function returnToLobby(ws) {
   room.pair = null
   room.pool = []
   room.reveal = null
+  room.startAt = null
+  room.durationMs = null
   room.endsAt = null
   for (const player of room.players.values()) {
     player.pair = null

@@ -1,0 +1,15 @@
+name = "rating-gate-room-worker"
+main = "src/index.ts"
+compatibility_date = "2026-05-21"
+
+routes = [
+  { pattern = "ratinggate.cn/ws*", zone_name = "ratinggate.cn" }
+]
+
+[[durable_objects.bindings]]
+name = "ROOM_HUB"
+class_name = "RoomHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomHub"]
