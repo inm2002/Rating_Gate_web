@@ -295,7 +295,7 @@ app.innerHTML = `
           <button class="primary-button" id="create-room" type="button">创建房间</button>
           <button class="ghost-button" id="join-room" type="button">加入房间</button>
         </div>
-        <p class="room-message" id="room-message">进入多人模式后会连接本地 WebSocket 房间服务。</p>
+        <p class="room-message" id="room-message">创建房间后分享房间码，或输入好友的房间码加入。</p>
       </div>
 
       <div class="room-card room-lobby" id="room-lobby" hidden>
@@ -815,7 +815,7 @@ function connectRoomSocket() {
   roomSocket.addEventListener('close', () => {
     roomConnectPromise = null
     setRoomConnectionState('联机未连接', 'bad')
-    if (remoteRoom) byId.roomMessage.textContent = '联机服务已断开，请确认 npm run dev:ws 正在运行。'
+    if (remoteRoom) byId.roomMessage.textContent = '联机服务已断开，请刷新页面后重试。'
   })
   roomSocket.addEventListener('error', () => {
     setRoomConnectionState('连接失败', 'bad')
@@ -851,7 +851,7 @@ function connectRoomSocket() {
 
 function sendRoomMessage(payload: Record<string, unknown>) {
   if (!isRoomSocketOpen()) {
-    byId.roomMessage.textContent = '联机服务未连接，请先运行 npm run dev:ws。'
+    byId.roomMessage.textContent = '联机服务暂时不可用，请稍后重试。'
     showToast('联机服务未连接')
     return false
   }
@@ -902,7 +902,7 @@ function renderRoom() {
     byId.roomGuide.hidden = false
     byId.roomBattle.hidden = true
     byId.roomCodeDisplay.value = '------'
-    byId.roomMessage.textContent = '进入多人模式后会连接本地 WebSocket 房间服务。'
+    byId.roomMessage.textContent = '创建房间后分享房间码，或输入好友的房间码加入。'
     return
   }
   byId.roomCodeDisplay.value = localRoom.code
@@ -1199,7 +1199,7 @@ async function createNetworkRoom() {
   syncRoomSettings()
   const connected = await connectRoomSocket()
   if (!connected) {
-    byId.roomMessage.textContent = '无法连接联机服务，请先运行 npm run dev:ws。'
+    byId.roomMessage.textContent = '无法连接联机服务，请稍后重试。'
     return
   }
   remoteGame = null
@@ -1226,7 +1226,7 @@ async function joinNetworkRoom() {
   byId.roomCodeInput.value = code
   const connected = await connectRoomSocket()
   if (!connected) {
-    byId.roomMessage.textContent = '无法连接联机服务，请先运行 npm run dev:ws。'
+    byId.roomMessage.textContent = '无法连接联机服务，请稍后重试。'
     return
   }
   remoteGame = null
