@@ -286,12 +286,11 @@ app.innerHTML = `
             </select>
           </label>
 
-          <fieldset class="galgame-audience-set" id="solo-galgame-audience" hidden>
-            <legend>Galgame 年龄</legend>
-            <div class="audience-switch" aria-label="Galgame 年龄筛选">
-              <button type="button" data-galgame-audience="all" aria-pressed="true">全部</button>
-              <button type="button" data-galgame-audience="allAges" aria-pressed="false">全年龄</button>
-              <button type="button" data-galgame-audience="adult" aria-pressed="false">非全年龄</button>
+          <fieldset class="exclude-set" id="solo-galgame-audience" hidden>
+            <legend>排除</legend>
+            <div class="toggle-grid" aria-label="Galgame 排除">
+              <button type="button" data-galgame-audience="adult" aria-pressed="false">全年龄</button>
+              <button type="button" data-galgame-audience="allAges" aria-pressed="false">非全年龄</button>
             </div>
           </fieldset>
 
@@ -309,21 +308,21 @@ app.innerHTML = `
           </fieldset>
 
           <fieldset class="exclude-set" id="solo-manga-filters" hidden>
-            <legend>漫画筛选</legend>
+            <legend>排除</legend>
             <div class="toggle-grid">
-              <label><input id="manga-filter-short" type="checkbox" /><span>排除短篇</span></label>
-              <label><input id="manga-filter-medium" type="checkbox" /><span>排除中篇</span></label>
-              <label><input id="manga-filter-four-panel" type="checkbox" /><span>排除四格</span></label>
-              <label><input id="manga-filter-completed" type="checkbox" /><span>只看已完结</span></label>
-              <label><input id="manga-filter-novel-adapted" type="checkbox" /><span>排除小说改</span></label>
+              <label><input id="manga-filter-short" type="checkbox" /><span>短篇</span></label>
+              <label><input id="manga-filter-medium" type="checkbox" /><span>中篇</span></label>
+              <label><input id="manga-filter-four-panel" type="checkbox" /><span>四格</span></label>
+              <label><input id="manga-filter-completed" type="checkbox" /><span>未完结</span></label>
+              <label><input id="manga-filter-novel-adapted" type="checkbox" /><span>小说改</span></label>
             </div>
           </fieldset>
 
           <fieldset class="exclude-set" id="solo-light-novel-filters" hidden>
-            <legend>轻小说筛选</legend>
+            <legend>排除</legend>
             <div class="toggle-grid">
-              <label><input id="light-novel-filter-web" type="checkbox" /><span>排除 Web 小说</span></label>
-              <label><input id="light-novel-filter-completed" type="checkbox" /><span>只看已完结</span></label>
+              <label><input id="light-novel-filter-web" type="checkbox" /><span>Web 小说</span></label>
+              <label><input id="light-novel-filter-completed" type="checkbox" /><span>未完结</span></label>
             </div>
           </fieldset>
         </section>
@@ -459,12 +458,11 @@ app.innerHTML = `
               </select>
             </label>
 
-            <fieldset class="galgame-audience-set" id="room-galgame-audience" hidden>
-              <legend>Galgame 年龄</legend>
-              <div class="room-audience-switch" aria-label="房间 Galgame 年龄筛选">
-                <button type="button" data-room-galgame-audience="all" aria-pressed="true">全部</button>
-                <button type="button" data-room-galgame-audience="allAges" aria-pressed="false">全年龄</button>
-                <button type="button" data-room-galgame-audience="adult" aria-pressed="false">非全年龄</button>
+            <fieldset class="exclude-set" id="room-galgame-audience" hidden>
+              <legend>排除</legend>
+              <div class="toggle-grid" aria-label="房间 Galgame 排除">
+                <button type="button" data-room-galgame-audience="adult" aria-pressed="false">全年龄</button>
+                <button type="button" data-room-galgame-audience="allAges" aria-pressed="false">非全年龄</button>
               </div>
             </fieldset>
 
@@ -482,21 +480,21 @@ app.innerHTML = `
             </fieldset>
 
             <fieldset class="exclude-set" id="room-manga-filters" hidden>
-              <legend>漫画筛选</legend>
+              <legend>排除</legend>
               <div class="toggle-grid">
-                <label><input id="room-manga-filter-short" type="checkbox" /><span>排除短篇</span></label>
-                <label><input id="room-manga-filter-medium" type="checkbox" /><span>排除中篇</span></label>
-                <label><input id="room-manga-filter-four-panel" type="checkbox" /><span>排除四格</span></label>
-                <label><input id="room-manga-filter-completed" type="checkbox" /><span>只看已完结</span></label>
-                <label><input id="room-manga-filter-novel-adapted" type="checkbox" /><span>排除小说改</span></label>
+                <label><input id="room-manga-filter-short" type="checkbox" /><span>短篇</span></label>
+                <label><input id="room-manga-filter-medium" type="checkbox" /><span>中篇</span></label>
+                <label><input id="room-manga-filter-four-panel" type="checkbox" /><span>四格</span></label>
+                <label><input id="room-manga-filter-completed" type="checkbox" /><span>未完结</span></label>
+                <label><input id="room-manga-filter-novel-adapted" type="checkbox" /><span>小说改</span></label>
               </div>
             </fieldset>
 
             <fieldset class="exclude-set" id="room-light-novel-filters" hidden>
-              <legend>轻小说筛选</legend>
+              <legend>排除</legend>
               <div class="toggle-grid">
-                <label><input id="room-light-novel-filter-web" type="checkbox" /><span>排除 Web 小说</span></label>
-                <label><input id="room-light-novel-filter-completed" type="checkbox" /><span>只看已完结</span></label>
+                <label><input id="room-light-novel-filter-web" type="checkbox" /><span>Web 小说</span></label>
+                <label><input id="room-light-novel-filter-completed" type="checkbox" /><span>未完结</span></label>
               </div>
             </fieldset>
 
@@ -1628,7 +1626,7 @@ async function changeRoomMediaKind(mediaKind: MediaKind) {
 }
 
 function applyRoomGalgameAudience(audience: GalgameAudience) {
-  roomSettings = { ...roomSettings, galgameAudience: audience }
+  roomSettings = { ...roomSettings, galgameAudience: roomSettings.galgameAudience === audience ? 'all' : audience }
   activeRoomPreset = detectPreset(roomSettings)
   setRoomControlsFromSettings(roomSettings)
   renderRoomSettings()
@@ -2103,7 +2101,7 @@ function applyPreset(name: PresetName) {
 }
 
 function applyGalgameAudience(audience: GalgameAudience) {
-  settings = { ...settings, galgameAudience: audience }
+  settings = { ...settings, galgameAudience: settings.galgameAudience === audience ? 'all' : audience }
   activePreset = detectPreset(settings)
   setSoloControlsFromSettings(settings)
   restartGame()

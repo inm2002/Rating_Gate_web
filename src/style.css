@@ -339,7 +339,6 @@ h1 {
   letter-spacing: 0.08em;
 }
 
-.room-audience-switch,
 .room-media-switch,
 .room-mode-switch,
 .room-preset-row {
@@ -347,7 +346,6 @@ h1 {
   gap: 6px;
 }
 
-.room-audience-switch,
 .room-media-switch {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -364,7 +362,6 @@ h1 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.room-audience-switch button,
 .room-media-switch button,
 .room-mode-switch button,
 .room-preset-row button {
@@ -378,7 +375,6 @@ h1 {
   font-weight: 750;
 }
 
-.room-audience-switch button[aria-pressed='true'],
 .room-media-switch button[aria-pressed='true'],
 .room-mode-switch button[aria-pressed='true'],
 .room-preset-row button[aria-pressed='true'] {
@@ -757,13 +753,12 @@ h1 {
 .primary-button:focus-visible,
 .mode-switch button:focus-visible,
 .view-switch button:focus-visible,
-.room-audience-switch button:focus-visible,
 .room-media-switch button:focus-visible,
 .room-mode-switch button:focus-visible,
 .room-preset-row button:focus-visible,
-.audience-switch button:focus-visible,
 .media-switch button:focus-visible,
-.preset-row button:focus-visible {
+.preset-row button:focus-visible,
+.toggle-grid button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
@@ -985,7 +980,6 @@ h1 {
   gap: 15px;
 }
 
-.audience-switch,
 .preset-row {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -998,7 +992,6 @@ h1 {
   gap: 8px;
 }
 
-.audience-switch button,
 .media-switch button,
 .preset-row button {
   min-height: 34px;
@@ -1011,14 +1004,12 @@ h1 {
   font-weight: 750;
 }
 
-.audience-switch button:hover,
 .media-switch button:hover,
 .preset-row button:hover {
   border-color: var(--line-strong);
   color: var(--ink);
 }
 
-.audience-switch button[aria-pressed='true'],
 .media-switch button[aria-pressed='true'],
 .preset-row button[aria-pressed='true'] {
   border-color: var(--ink);
@@ -1035,8 +1026,7 @@ h1 {
 }
 
 .control-field > span,
-.exclude-set legend,
-.galgame-audience-set legend {
+.exclude-set legend {
   color: var(--ink);
   font-size: 0.84rem;
   font-weight: 780;
@@ -1118,17 +1108,7 @@ h1 {
   padding: 0;
 }
 
-.galgame-audience-set {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-  margin: 0;
-  border: 0;
-  padding: 0;
-}
-
-.exclude-set legend,
-.galgame-audience-set legend {
+.exclude-set legend {
   margin-bottom: 10px;
   padding: 0;
 }
@@ -1153,7 +1133,8 @@ h1 {
   pointer-events: none;
 }
 
-.toggle-grid span {
+.toggle-grid span,
+.toggle-grid button {
   display: inline-flex;
   align-items: center;
   min-height: 34px;
@@ -1170,13 +1151,19 @@ h1 {
     color 0.16s ease;
 }
 
-.toggle-grid input:checked + span {
+.toggle-grid input:checked + span,
+.toggle-grid button[aria-pressed='true'] {
   border-color: rgba(216, 95, 134, 0.34);
   background: rgba(216, 95, 134, 0.1);
   color: var(--accent-deep);
 }
 
-.toggle-grid input:disabled + span {
+.toggle-grid button {
+  cursor: pointer;
+}
+
+.toggle-grid input:disabled + span,
+.toggle-grid button:disabled {
   cursor: not-allowed;
   opacity: 0.62;
 }
