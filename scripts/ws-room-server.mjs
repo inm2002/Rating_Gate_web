@@ -11,9 +11,25 @@ const port = Number.parseInt(process.env.BGM_WS_PORT ?? '8787', 10)
 const maxPlayers = 8
 const currentYear = new Date().getFullYear()
 
-let allAnime = []
+const allSubjects = new Map()
+const mediaKinds = ['anime', 'manga', 'lightNovel', 'galgame']
+const seedFiles = {
+  anime: 'anime-seed.json',
+  manga: 'manga-seed.json',
+  lightNovel: 'light-novel-seed.json',
+  galgame: 'galgame-seed.json',
+}
 
 const presetExcludeDefaults = ['guochan', 'movies', 'oumei', 'recap']
+const tagFilterKeys = [
+  'mangaShort',
+  'mangaMedium',
+  'mangaFourPanel',
+  'mangaCompleted',
+  'mangaNovelAdapted',
+  'lightNovelWeb',
+  'lightNovelCompleted',
+]
 const excludeTerms = {
   guochan: ['国产', '国漫', '中国', '中国大陆', '大陆'],
   movies: ['剧场版', '劇場版', '剧场', '劇場', '映画'],
@@ -24,45 +40,71 @@ const excludeTerms = {
   recap: ['总集篇', '總集篇', '总集', '總集', 'Recap'],
 }
 
+const tagFilterTerms = {
+  mangaShort: ['短篇'],
+  mangaMedium: ['中篇'],
+  mangaFourPanel: ['四格', '4格'],
+  mangaNovelAdapted: ['小说改', '小說改', '轻小说改', '輕小說改'],
+  lightNovelWeb: ['web', 'web小说', 'web小說', '小説家になろう'],
+}
+
 const rooms = new Map()
 const clients = new Map()
 
-export async function loadAnimeSeed(seedPath = join(rootDir, 'public', 'anime-seed.json')) {
-  if (allAnime.length) return allAnime
-  allAnime = JSON.parse(await readFile(seedPath, 'utf8'))
-  return allAnime
+export async function loadSubjectSeeds(seedDir = join(rootDir, 'public')) {
+  if (allSubjects.size === mediaKinds.length) return allSubjects
+  await Promise.all(
+    mediaKinds.map(async (mediaKind) => {
+      const seedPath = join(seedDir, seedFiles[mediaKind])
+      const rows = JSON.parse(await readFile(seedPath, 'utf8'))
+      allSubjects.set(
+        mediaKind,
+        rows.map((row) => ({ ...row, mediaKind: row.mediaKind ?? mediaKind })),
+      )
+    }),
+  )
+  return allSubjects
 }
 
 export function roomCount() {
   return rooms.size
 }
 
-function createDefaultSettings() {
+function sanitizeMediaKind(value) {
+  return mediaKinds.includes(value) ? value : 'anime'
+}
+
+function createDefaultSettings(mediaKind = 'anime') {
   return {
-    minVotes: 100,
+    mediaKind,
+    minVotes: mediaKind === 'anime' ? 100 : 50,
     scoreMin: 0,
     scoreMax: 10,
     yearMin: 1900,
     yearMax: currentYear,
     ranking: 'all',
+    galgameAudience: 'all',
     excludes: Object.fromEntries(
       ['guochan', 'movies', 'ova', 'pamen', 'oumei', 'short', 'recap'].map((key) => [
         key,
-        presetExcludeDefaults.includes(key),
+        mediaKind === 'anime' && presetExcludeDefaults.includes(key),
       ]),
     ),
+    tagFilters: Object.fromEntries(tagFilterKeys.map((key) => [key, false])),
   }
 }
 
 function sanitizeSettings(settings = {}) {
-  const defaults = createDefaultSettings()
+  const mediaKind = sanitizeMediaKind(settings.mediaKind)
+  const defaults = createDefaultSettings(mediaKind)
   const minVotes = Number.parseInt(settings.minVotes, 10)
   const scoreMin = Number.parseFloat(settings.scoreMin)
   const scoreMax = Number.parseFloat(settings.scoreMax)
   const yearMin = Number.parseInt(settings.yearMin, 10)
   const yearMax = Number.parseInt(settings.yearMax, 10)
   const next = {
-    minVotes: Number.isFinite(minVotes) ? Math.max(100, Math.min(5000, minVotes)) : defaults.minVotes,
+    mediaKind,
+    minVotes: Number.isFinite(minVotes) ? Math.max(defaults.minVotes, Math.min(5000, minVotes)) : defaults.minVotes,
     scoreMin: Number.isFinite(scoreMin) ? Math.max(0, Math.min(10, scoreMin)) : defaults.scoreMin,
     scoreMax: Number.isFinite(scoreMax) ? Math.max(0, Math.min(10, scoreMax)) : defaults.scoreMax,
     yearMin: Number.isFinite(yearMin) ? Math.max(1900, Math.min(2030, yearMin)) : defaults.yearMin,
@@ -70,9 +112,14 @@ function sanitizeSettings(settings = {}) {
     ranking: ['all', 'top500', 'top2000', 'middle', 'deep'].includes(settings.ranking)
       ? settings.ranking
       : defaults.ranking,
+    galgameAudience: ['all', 'allAges', 'adult'].includes(settings.galgameAudience)
+      ? settings.galgameAudience
+      : defaults.galgameAudience,
     excludes: { ...defaults.excludes },
+    tagFilters: { ...defaults.tagFilters },
   }
   for (const key of Object.keys(next.excludes)) next.excludes[key] = Boolean(settings.excludes?.[key])
+  for (const key of tagFilterKeys) next.tagFilters[key] = Boolean(settings.tagFilters?.[key])
   if (next.scoreMin > next.scoreMax) [next.scoreMin, next.scoreMax] = [next.scoreMax, next.scoreMin]
   if (next.yearMin > next.yearMax) [next.yearMin, next.yearMax] = [next.yearMax, next.yearMin]
   return next
@@ -99,15 +146,46 @@ function matchesAny(anime, terms) {
 }
 
 function isExcluded(anime, settings) {
+  if (settings.mediaKind !== 'anime' || anime.mediaKind !== 'anime') return false
   return Object.keys(settings.excludes).some((key) => settings.excludes[key] && matchesAny(anime, excludeTerms[key]))
 }
 
-function filterAnime(settings) {
-  return allAnime.filter((anime) => {
+function hasTag(anime, terms) {
+  const tags = (anime.tags ?? []).map((tag) => String(tag).toLowerCase())
+  return terms.some((term) => tags.includes(term.toLowerCase()))
+}
+
+function matchesTagFilter(anime, key) {
+  if (key === 'mangaCompleted' || key === 'lightNovelCompleted') {
+    return hasTag(anime, ['已完结', '完结', '已完結', '完結'])
+  }
+  return matchesAny(anime, tagFilterTerms[key] ?? [])
+}
+
+function matchesMediaTagFilters(anime, settings) {
+  if (anime.mediaKind === 'manga') {
+    if (settings.tagFilters.mangaShort && matchesTagFilter(anime, 'mangaShort')) return false
+    if (settings.tagFilters.mangaMedium && matchesTagFilter(anime, 'mangaMedium')) return false
+    if (settings.tagFilters.mangaFourPanel && matchesTagFilter(anime, 'mangaFourPanel')) return false
+    if (settings.tagFilters.mangaNovelAdapted && matchesTagFilter(anime, 'mangaNovelAdapted')) return false
+    if (settings.tagFilters.mangaCompleted && !matchesTagFilter(anime, 'mangaCompleted')) return false
+  }
+  if (anime.mediaKind === 'lightNovel') {
+    if (settings.tagFilters.lightNovelWeb && matchesTagFilter(anime, 'lightNovelWeb')) return false
+    if (settings.tagFilters.lightNovelCompleted && !matchesTagFilter(anime, 'lightNovelCompleted')) return false
+  }
+  return true
+}
+
+function filterSubjects(settings) {
+  return (allSubjects.get(settings.mediaKind) ?? []).filter((anime) => {
     const year = yearOf(anime)
     const inYear = year === 0 || (year >= settings.yearMin && year <= settings.yearMax)
     if (anime.votes < settings.minVotes || !inYear) return false
     if (anime.score < settings.scoreMin || anime.score > settings.scoreMax) return false
+    if (settings.mediaKind === 'galgame' && settings.galgameAudience === 'allAges' && anime.adult) return false
+    if (settings.mediaKind === 'galgame' && settings.galgameAudience === 'adult' && !anime.adult) return false
+    if (!matchesMediaTagFilters(anime, settings)) return false
     if (isExcluded(anime, settings)) return false
     if (settings.ranking === 'top500') return anime.rank !== null && anime.rank <= 500
     if (settings.ranking === 'top2000') return anime.rank !== null && anime.rank <= 2000
@@ -157,6 +235,7 @@ function judge(pair, side) {
 function publicAnime(anime) {
   return {
     id: anime.id,
+    mediaKind: anime.mediaKind,
     name: anime.name,
     nameCn: anime.nameCn,
     score: anime.score,
@@ -165,6 +244,7 @@ function publicAnime(anime) {
     date: anime.date,
     image: anime.image,
     platform: anime.platform,
+    adult: Boolean(anime.adult),
   }
 }
 
@@ -208,6 +288,7 @@ function roomPayload(room, playerIdForClient) {
     hostId: room.hostId,
     status: room.status,
     mode: room.mode,
+    mediaKind: room.settings.mediaKind,
     length: modeLength,
     settings: room.settings,
     poolCount: room.poolCount,
@@ -246,10 +327,10 @@ function broadcastRoom(room) {
 function updateRoomSettings(room, payload) {
   if (room.status !== 'lobby') return
   room.mode = sanitizeMode(payload.mode)
-  room.settings = sanitizeSettings(payload.settings)
+  room.settings = sanitizeSettings({ ...payload.settings, mediaKind: payload.mediaKind ?? payload.settings?.mediaKind })
   room.classicRounds = sanitizeLength('classic', payload.classicRounds ?? payload.length)
   room.timedSeconds = sanitizeLength('timed', payload.timedSeconds ?? payload.length)
-  room.poolCount = filterAnime(room.settings).length
+  room.poolCount = filterSubjects(room.settings).length
 }
 
 function requireHost(ws, room) {
@@ -282,7 +363,7 @@ function attachPlayer(ws, room, nickname, isHost = false) {
 function createRoom(ws, payload) {
   const code = roomCode()
   const mode = sanitizeMode(payload.mode)
-  const settings = sanitizeSettings(payload.settings)
+  const settings = sanitizeSettings({ ...payload.settings, mediaKind: payload.mediaKind ?? payload.settings?.mediaKind })
   const room = {
     code,
     hostId: '',
@@ -291,7 +372,7 @@ function createRoom(ws, payload) {
     settings,
     classicRounds: sanitizeLength('classic', payload.classicRounds ?? payload.length),
     timedSeconds: sanitizeLength('timed', payload.timedSeconds ?? payload.length),
-    poolCount: filterAnime(settings).length,
+    poolCount: filterSubjects(settings).length,
     players: new Map(),
     answers: new Map(),
     round: 0,
@@ -331,7 +412,7 @@ function joinRoom(ws, payload) {
 function startGame(ws) {
   const room = findRoomFor(ws)
   if (!room || !requireHost(ws, room)) return
-  room.pool = filterAnime(room.settings)
+  room.pool = filterSubjects(room.settings)
   if (!pickPair(room.pool)) {
     send(ws, { type: 'error', message: '当前筛选下题目不足，或评分都相同。' })
     return
@@ -529,7 +610,7 @@ export function createRoomWebSocketHandler() {
 }
 
 async function startLocalServer() {
-  await loadAnimeSeed()
+  await loadSubjectSeeds()
   const server = createServer((request, response) => {
     if (request.url === '/health') {
       response.writeHead(200, { 'content-type': 'application/json' })

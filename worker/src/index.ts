@@ -3,6 +3,16 @@ type RoomStatus = 'lobby' | 'question' | 'reveal' | 'ended'
 type Side = 'left' | 'right'
 type RankingFilter = 'all' | 'top500' | 'top2000' | 'middle' | 'deep'
 type ExcludeKey = 'guochan' | 'movies' | 'ova' | 'pamen' | 'oumei' | 'short' | 'recap'
+type MediaTagFilterKey =
+  | 'mangaShort'
+  | 'mangaMedium'
+  | 'mangaFourPanel'
+  | 'mangaCompleted'
+  | 'mangaNovelAdapted'
+  | 'lightNovelWeb'
+  | 'lightNovelCompleted'
+type MediaKind = 'anime' | 'manga' | 'lightNovel' | 'galgame'
+type GalgameAudience = 'all' | 'allAges' | 'adult'
 
 interface Env {
   ROOM_HUB: DurableObjectNamespace
@@ -10,17 +20,21 @@ interface Env {
 }
 
 interface Settings {
+  mediaKind: MediaKind
   minVotes: number
   scoreMin: number
   scoreMax: number
   yearMin: number
   yearMax: number
   ranking: RankingFilter
+  galgameAudience: GalgameAudience
   excludes: Record<ExcludeKey, boolean>
+  tagFilters: Record<MediaTagFilterKey, boolean>
 }
 
 interface Anime {
   id: number
+  mediaKind: MediaKind
   name: string
   nameCn: string
   score: number
@@ -30,6 +44,7 @@ interface Anime {
   image: string
   tags: string[]
   platform: string
+  adult?: boolean
 }
 
 interface Player {
@@ -79,7 +94,23 @@ interface AnswerResult {
 
 const maxPlayers = 8
 const currentYear = new Date().getFullYear()
+const mediaKinds: MediaKind[] = ['anime', 'manga', 'lightNovel', 'galgame']
+const seedFiles: Record<MediaKind, string> = {
+  anime: 'anime-seed.json',
+  manga: 'manga-seed.json',
+  lightNovel: 'light-novel-seed.json',
+  galgame: 'galgame-seed.json',
+}
 const presetExcludeDefaults: ExcludeKey[] = ['guochan', 'movies', 'oumei', 'recap']
+const tagFilterKeys: MediaTagFilterKey[] = [
+  'mangaShort',
+  'mangaMedium',
+  'mangaFourPanel',
+  'mangaCompleted',
+  'mangaNovelAdapted',
+  'lightNovelWeb',
+  'lightNovelCompleted',
+]
 const excludeTerms: Record<ExcludeKey, string[]> = {
   guochan: ['国产', '国漫', '中国', '中国大陆', '大陆'],
   movies: ['剧场版', '劇場版', '剧场', '劇場', '映画'],
@@ -88,6 +119,13 @@ const excludeTerms: Record<ExcludeKey, string[]> = {
   oumei: ['欧美', '美国', '英国', '法国', '加拿大', '欧洲'],
   short: ['短片', '短篇', 'Short'],
   recap: ['总集篇', '總集篇', '总集', '總集', 'Recap'],
+}
+const tagFilterTerms: Partial<Record<MediaTagFilterKey, string[]>> = {
+  mangaShort: ['短篇'],
+  mangaMedium: ['中篇'],
+  mangaFourPanel: ['四格', '4格'],
+  mangaNovelAdapted: ['小说改', '小說改', '轻小说改', '輕小說改'],
+  lightNovelWeb: ['web', 'web小说', 'web小說', '小説家になろう'],
 }
 
 export default {
@@ -106,8 +144,8 @@ export class RoomHub {
   private env: Env
   private rooms = new Map<string, Room>()
   private clients = new Map<WebSocket, { roomCode: string; playerId: string }>()
-  private allAnime: Anime[] = []
-  private animePromise: Promise<Anime[]> | null = null
+  private allSubjects = new Map<MediaKind, Anime[]>()
+  private seedPromise: Promise<Map<MediaKind, Anime[]>> | null = null
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
@@ -117,7 +155,7 @@ export class RoomHub {
   async fetch(request: Request) {
     const upgradeHeader = request.headers.get('upgrade')
     if (upgradeHeader?.toLowerCase() === 'websocket') {
-      await this.loadAnimeSeed(request)
+      await this.loadSubjectSeeds(request)
       const pair = new WebSocketPair()
       const [client, server] = Object.values(pair)
       server.accept()
@@ -125,7 +163,7 @@ export class RoomHub {
       return new Response(null, { status: 101, webSocket: client })
     }
 
-    await this.loadAnimeSeed(request)
+    await this.loadSubjectSeeds(request)
     return Response.json(
       {
         ok: true,
@@ -137,18 +175,22 @@ export class RoomHub {
     )
   }
 
-  private async loadAnimeSeed(request: Request) {
-    if (this.allAnime.length) return this.allAnime
-    this.animePromise ??= fetch(this.env.SEED_URL || `${new URL(request.url).origin}/anime-seed.json`)
-      .then((response) => {
-        if (!response.ok) throw new Error(`Failed to load anime seed: HTTP ${response.status}`)
-        return response.json() as Promise<Anime[]>
-      })
-      .then((anime) => {
-        this.allAnime = anime
-        return anime
-      })
-    return this.animePromise
+  private async loadSubjectSeeds(request: Request) {
+    if (this.allSubjects.size === mediaKinds.length) return this.allSubjects
+    const origin = new URL(request.url).origin
+    this.seedPromise ??= Promise.all(
+      mediaKinds.map(async (mediaKind) => {
+        const animeSeedUrl = mediaKind === 'anime' ? this.env.SEED_URL : undefined
+        const response = await fetch(animeSeedUrl || `${origin}/${seedFiles[mediaKind]}`)
+        if (!response.ok) throw new Error(`Failed to load ${mediaKind} seed: HTTP ${response.status}`)
+        const rows = (await response.json()) as Anime[]
+        return [mediaKind, rows.map((row) => ({ ...row, mediaKind: row.mediaKind ?? mediaKind }))] as const
+      }),
+    ).then((entries) => {
+      this.allSubjects = new Map(entries)
+      return this.allSubjects
+    })
+    return this.seedPromise
   }
 
   private open(ws: WebSocket) {
@@ -182,35 +224,46 @@ export class RoomHub {
     else if (payload.type === 'leaveRoom') this.leave(ws)
   }
 
-  private createDefaultSettings(): Settings {
+  private sanitizeMediaKind(value: unknown): MediaKind {
+    return mediaKinds.includes(value as MediaKind) ? (value as MediaKind) : 'anime'
+  }
+
+  private createDefaultSettings(mediaKind: MediaKind = 'anime'): Settings {
     return {
-      minVotes: 100,
+      mediaKind,
+      minVotes: mediaKind === 'anime' ? 100 : 50,
       scoreMin: 0,
       scoreMax: 10,
       yearMin: 1900,
       yearMax: currentYear,
       ranking: 'all',
+      galgameAudience: 'all',
       excludes: {
-        guochan: true,
-        movies: true,
+        guochan: mediaKind === 'anime',
+        movies: mediaKind === 'anime',
         ova: false,
         pamen: false,
-        oumei: true,
+        oumei: mediaKind === 'anime',
         short: false,
-        recap: true,
+        recap: mediaKind === 'anime',
       },
+      tagFilters: Object.fromEntries(tagFilterKeys.map((key) => [key, false])) as Record<MediaTagFilterKey, boolean>,
     }
   }
 
   private sanitizeSettings(settings = {} as Partial<Settings>): Settings {
-    const defaults = this.createDefaultSettings()
+    const mediaKind = this.sanitizeMediaKind(settings.mediaKind)
+    const defaults = this.createDefaultSettings(mediaKind)
     const minVotes = Number.parseInt(String(settings.minVotes), 10)
     const scoreMin = Number.parseFloat(String(settings.scoreMin))
     const scoreMax = Number.parseFloat(String(settings.scoreMax))
     const yearMin = Number.parseInt(String(settings.yearMin), 10)
     const yearMax = Number.parseInt(String(settings.yearMax), 10)
     const next: Settings = {
-      minVotes: Number.isFinite(minVotes) ? Math.max(100, Math.min(5000, minVotes)) : defaults.minVotes,
+      mediaKind,
+      minVotes: Number.isFinite(minVotes)
+        ? Math.max(defaults.minVotes, Math.min(5000, minVotes))
+        : defaults.minVotes,
       scoreMin: Number.isFinite(scoreMin) ? Math.max(0, Math.min(10, scoreMin)) : defaults.scoreMin,
       scoreMax: Number.isFinite(scoreMax) ? Math.max(0, Math.min(10, scoreMax)) : defaults.scoreMax,
       yearMin: Number.isFinite(yearMin) ? Math.max(1900, Math.min(2030, yearMin)) : defaults.yearMin,
@@ -218,10 +271,17 @@ export class RoomHub {
       ranking: ['all', 'top500', 'top2000', 'middle', 'deep'].includes(String(settings.ranking))
         ? (settings.ranking as RankingFilter)
         : defaults.ranking,
+      galgameAudience: ['all', 'allAges', 'adult'].includes(String(settings.galgameAudience))
+        ? (settings.galgameAudience as GalgameAudience)
+        : defaults.galgameAudience,
       excludes: { ...defaults.excludes },
+      tagFilters: { ...defaults.tagFilters },
     }
     for (const key of Object.keys(next.excludes) as ExcludeKey[]) {
       next.excludes[key] = Boolean(settings.excludes?.[key])
+    }
+    for (const key of tagFilterKeys) {
+      next.tagFilters[key] = Boolean(settings.tagFilters?.[key])
     }
     if (next.scoreMin > next.scoreMax) [next.scoreMin, next.scoreMax] = [next.scoreMax, next.scoreMin]
     if (next.yearMin > next.yearMax) [next.yearMin, next.yearMax] = [next.yearMax, next.yearMin]
@@ -249,17 +309,48 @@ export class RoomHub {
   }
 
   private isExcluded(anime: Anime, settings: Settings) {
+    if (settings.mediaKind !== 'anime' || anime.mediaKind !== 'anime') return false
     return (Object.keys(settings.excludes) as ExcludeKey[]).some(
       (key) => settings.excludes[key] && this.matchesAny(anime, excludeTerms[key]),
     )
   }
 
-  private filterAnime(settings: Settings) {
-    return this.allAnime.filter((anime) => {
+  private hasTag(anime: Anime, terms: string[]) {
+    const tags = (anime.tags ?? []).map((tag) => String(tag).toLowerCase())
+    return terms.some((term) => tags.includes(term.toLowerCase()))
+  }
+
+  private matchesTagFilter(anime: Anime, key: MediaTagFilterKey) {
+    if (key === 'mangaCompleted' || key === 'lightNovelCompleted') {
+      return this.hasTag(anime, ['已完结', '完结', '已完結', '完結'])
+    }
+    return this.matchesAny(anime, tagFilterTerms[key] ?? [])
+  }
+
+  private matchesMediaTagFilters(anime: Anime, settings: Settings) {
+    if (anime.mediaKind === 'manga') {
+      if (settings.tagFilters.mangaShort && this.matchesTagFilter(anime, 'mangaShort')) return false
+      if (settings.tagFilters.mangaMedium && this.matchesTagFilter(anime, 'mangaMedium')) return false
+      if (settings.tagFilters.mangaFourPanel && this.matchesTagFilter(anime, 'mangaFourPanel')) return false
+      if (settings.tagFilters.mangaNovelAdapted && this.matchesTagFilter(anime, 'mangaNovelAdapted')) return false
+      if (settings.tagFilters.mangaCompleted && !this.matchesTagFilter(anime, 'mangaCompleted')) return false
+    }
+    if (anime.mediaKind === 'lightNovel') {
+      if (settings.tagFilters.lightNovelWeb && this.matchesTagFilter(anime, 'lightNovelWeb')) return false
+      if (settings.tagFilters.lightNovelCompleted && !this.matchesTagFilter(anime, 'lightNovelCompleted')) return false
+    }
+    return true
+  }
+
+  private filterSubjects(settings: Settings) {
+    return (this.allSubjects.get(settings.mediaKind) ?? []).filter((anime) => {
       const year = this.yearOf(anime)
       const inYear = year === 0 || (year >= settings.yearMin && year <= settings.yearMax)
       if (anime.votes < settings.minVotes || !inYear) return false
       if (anime.score < settings.scoreMin || anime.score > settings.scoreMax) return false
+      if (settings.mediaKind === 'galgame' && settings.galgameAudience === 'allAges' && anime.adult) return false
+      if (settings.mediaKind === 'galgame' && settings.galgameAudience === 'adult' && !anime.adult) return false
+      if (!this.matchesMediaTagFilters(anime, settings)) return false
       if (this.isExcluded(anime, settings)) return false
       if (settings.ranking === 'top500') return anime.rank !== null && anime.rank <= 500
       if (settings.ranking === 'top2000') return anime.rank !== null && anime.rank <= 2000
@@ -305,6 +396,7 @@ export class RoomHub {
   private publicAnime(anime: Anime) {
     return {
       id: anime.id,
+      mediaKind: anime.mediaKind,
       name: anime.name,
       nameCn: anime.nameCn,
       score: anime.score,
@@ -313,6 +405,7 @@ export class RoomHub {
       date: anime.date,
       image: anime.image,
       platform: anime.platform,
+      adult: Boolean(anime.adult),
     }
   }
 
@@ -355,6 +448,7 @@ export class RoomHub {
       hostId: room.hostId,
       status: room.status,
       mode: room.mode,
+      mediaKind: room.settings.mediaKind,
       length: room.mode === 'timed' ? room.timedSeconds : room.classicRounds,
       settings: room.settings,
       poolCount: room.poolCount,
@@ -392,11 +486,15 @@ export class RoomHub {
 
   private updateRoomSettings(room: Room, payload: Record<string, unknown>) {
     if (room.status !== 'lobby') return
+    const payloadSettings = payload.settings as Partial<Settings> | undefined
     room.mode = this.sanitizeMode(payload.mode)
-    room.settings = this.sanitizeSettings(payload.settings as Partial<Settings>)
+    room.settings = this.sanitizeSettings({
+      ...payloadSettings,
+      mediaKind: this.sanitizeMediaKind(payload.mediaKind ?? payloadSettings?.mediaKind),
+    })
     room.classicRounds = this.sanitizeLength('classic', payload.classicRounds ?? payload.length)
     room.timedSeconds = this.sanitizeLength('timed', payload.timedSeconds ?? payload.length)
-    room.poolCount = this.filterAnime(room.settings).length
+    room.poolCount = this.filterSubjects(room.settings).length
   }
 
   private requireHost(ws: WebSocket, room: Room) {
@@ -429,7 +527,11 @@ export class RoomHub {
   private createRoom(ws: WebSocket, payload: Record<string, unknown>) {
     const code = this.roomCode()
     const mode = this.sanitizeMode(payload.mode)
-    const settings = this.sanitizeSettings(payload.settings as Partial<Settings>)
+    const payloadSettings = payload.settings as Partial<Settings> | undefined
+    const settings = this.sanitizeSettings({
+      ...payloadSettings,
+      mediaKind: this.sanitizeMediaKind(payload.mediaKind ?? payloadSettings?.mediaKind),
+    })
     const room: Room = {
       code,
       hostId: '',
@@ -438,7 +540,7 @@ export class RoomHub {
       settings,
       classicRounds: this.sanitizeLength('classic', payload.classicRounds ?? payload.length),
       timedSeconds: this.sanitizeLength('timed', payload.timedSeconds ?? payload.length),
-      poolCount: this.filterAnime(settings).length,
+      poolCount: this.filterSubjects(settings).length,
       players: new Map(),
       answers: new Map(),
       round: 0,
@@ -478,7 +580,7 @@ export class RoomHub {
   private startGame(ws: WebSocket) {
     const room = this.findRoomFor(ws)
     if (!room || !this.requireHost(ws, room)) return
-    room.pool = this.filterAnime(room.settings)
+    room.pool = this.filterSubjects(room.settings)
     if (!this.pickPair(room.pool)) {
       this.send(ws, { type: 'error', message: '当前筛选下题目不足，或评分都相同。' })
       return

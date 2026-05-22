@@ -80,6 +80,38 @@ try {
   const scores = await page.locator('.score-line').evaluateAll((nodes) => nodes.map((node) => node.textContent))
   const footerLinkCount = await page.locator('.site-footer a').count()
   const footerText = await page.locator('.site-footer').innerText()
+  await page.locator('[data-media-kind="manga"]').click()
+  await page.waitForSelector('#prompt:text("哪部漫画评分更高")')
+  await page.waitForSelector('#card-left img[src]')
+  const mangaPool = await page.locator('#pool-count').innerText()
+  const mangaExcludesHidden = await page.locator('#solo-anime-excludes').isHidden()
+  const mangaPresetsHidden = await page.locator('#solo-anime-presets').isHidden()
+  await page.locator('#manga-filter-completed + span').click()
+  await page.waitForTimeout(200)
+  const completedMangaPool = await page.locator('#pool-count').innerText()
+  await page.locator('[data-media-kind="lightNovel"]').click()
+  await page.waitForSelector('#prompt:text("哪部轻小说评分更高")')
+  await page.waitForSelector('#card-left img[src]')
+  const lightNovelPool = await page.locator('#pool-count').innerText()
+  const lightNovelExcludesHidden = await page.locator('#solo-anime-excludes').isHidden()
+  const lightNovelPresetsHidden = await page.locator('#solo-anime-presets').isHidden()
+  await page.locator('#light-novel-filter-web + span').click()
+  await page.waitForTimeout(200)
+  const nonWebLightNovelPool = await page.locator('#pool-count').innerText()
+  await page.locator('[data-media-kind="galgame"]').click()
+  await page.waitForSelector('#prompt:text("哪部Galgame评分更高")')
+  await page.waitForSelector('#title-left:not(:empty)')
+  const galgamePool = await page.locator('#pool-count').innerText()
+  const galgamePresetsHidden = await page.locator('#solo-anime-presets').isHidden()
+  await page.locator('[data-galgame-audience="allAges"]').click()
+  await page.waitForTimeout(200)
+  const allAgesGalgamePool = await page.locator('#pool-count').innerText()
+  await page.locator('[data-galgame-audience="adult"]').click()
+  await page.waitForTimeout(200)
+  const adultGalgamePool = await page.locator('#pool-count').innerText()
+  const adultTitleCover = await page.locator('#poster-left').getAttribute('data-title-cover')
+  await page.locator('[data-media-kind="anime"]').click()
+  await page.waitForSelector('#prompt:text("哪部动画评分更高")')
   await page.locator('#score-min').fill('1')
   await page.waitForTimeout(100)
   const customPressed = await page
@@ -100,6 +132,19 @@ try {
   await page.locator('#score-min').type('4.9')
   await page.waitForTimeout(100)
   const soloScoreTypedValue = await page.locator('#score-min').inputValue()
+  await page.locator('#year-min').fill('')
+  await page.waitForTimeout(100)
+  const soloYearEmptyValue = await page.locator('#year-min').inputValue()
+  const totalBeforeSoloYearTyping = await page.locator('#metric-total').innerText()
+  await page.locator('#year-min').type('1998')
+  await page.waitForTimeout(250)
+  const soloYearTypedValue = await page.locator('#year-min').inputValue()
+  const totalAfterSoloYearTyping = await page.locator('#metric-total').innerText()
+  await page.locator('[data-year-range="before2010"]').click()
+  await page.waitForTimeout(150)
+  const soloQuickYearMin = await page.locator('#year-min').inputValue()
+  const soloQuickYearMax = await page.locator('#year-max').inputValue()
+  const soloQuickYearPressed = await page.locator('[data-year-range="before2010"]').getAttribute('aria-pressed')
   await page.locator('#restart').click()
   await page.waitForTimeout(300)
   await page.locator('#solo-view .stage').click()
@@ -137,6 +182,24 @@ try {
   await page.waitForTimeout(100)
   const roomScoreMax = await page.locator('#room-score-max').inputValue()
   const roomPool = await page.locator('#room-pool').innerText()
+  await page.locator('[data-room-media-kind="manga"]').click()
+  await page.waitForTimeout(300)
+  const roomMangaPool = await page.locator('#room-pool').innerText()
+  const roomMangaExcludesHidden = await page.locator('#room-anime-excludes').isHidden()
+  const roomMangaPresetsHidden = await page.locator('#room-anime-presets').isHidden()
+  await page.locator('#room-manga-filter-completed + span').click()
+  await page.waitForTimeout(200)
+  const roomCompletedMangaPool = await page.locator('#room-pool').innerText()
+  await page.locator('[data-room-media-kind="galgame"]').click()
+  await page.waitForTimeout(300)
+  const roomGalgamePool = await page.locator('#room-pool').innerText()
+  const roomGalgameExcludesHidden = await page.locator('#room-anime-excludes').isHidden()
+  const roomGalgamePresetsHidden = await page.locator('#room-anime-presets').isHidden()
+  await page.locator('[data-room-galgame-audience="adult"]').click()
+  await page.waitForTimeout(200)
+  const roomAdultGalgamePool = await page.locator('#room-pool').innerText()
+  await page.locator('[data-room-media-kind="anime"]').click()
+  await page.waitForTimeout(300)
   await page.locator('#room-score-min').fill('')
   await page.waitForTimeout(250)
   const roomScoreEmptyValue = await page.locator('#room-score-min').inputValue()
@@ -196,6 +259,29 @@ try {
   if (footerLinkCount !== 3) throw new Error(`Expected 3 footer links, found ${footerLinkCount}`)
   if (!footerText.includes('数据更新时间')) throw new Error('Footer did not include data update time')
   if (!footerText.includes('inm2002/Rating_Gate_web')) throw new Error('Footer did not include GitHub repository link')
+  if (mangaPool === '0 部' || !mangaExcludesHidden || !mangaPresetsHidden) {
+    throw new Error(
+      `Manga solo pool did not switch cleanly: pool=${mangaPool}, excludes=${mangaExcludesHidden}, presets=${mangaPresetsHidden}`,
+    )
+  }
+  if (completedMangaPool === mangaPool || completedMangaPool === '0 部') {
+    throw new Error(`Completed manga filter did not narrow pool: ${mangaPool} -> ${completedMangaPool}`)
+  }
+  if (lightNovelPool === '0 部' || !lightNovelExcludesHidden || !lightNovelPresetsHidden) {
+    throw new Error(
+      `Light novel solo pool did not switch cleanly: pool=${lightNovelPool}, excludes=${lightNovelExcludesHidden}, presets=${lightNovelPresetsHidden}`,
+    )
+  }
+  if (nonWebLightNovelPool === lightNovelPool || nonWebLightNovelPool === '0 部') {
+    throw new Error(`Light novel Web filter did not narrow pool: ${lightNovelPool} -> ${nonWebLightNovelPool}`)
+  }
+  if (galgamePool === '0 部') throw new Error(`Galgame solo pool did not switch: ${galgamePool}`)
+  if (!galgamePresetsHidden) throw new Error('Galgame solo presets should stay anime-only')
+  if (allAgesGalgamePool === '0 部' || adultGalgamePool === '0 部' || adultTitleCover !== 'true') {
+    throw new Error(
+      `Galgame audience filters/title cover failed: allAges=${allAgesGalgamePool}, adult=${adultGalgamePool}, cover=${adultTitleCover}`,
+    )
+  }
   if (customPressed.some((value) => value !== 'false')) throw new Error('Custom filters should clear preset highlight')
   if (totalBeforeTypingShortcut !== totalAfterTypingShortcut) {
     throw new Error(`Typing 1 in score input should not answer: ${totalBeforeTypingShortcut} -> ${totalAfterTypingShortcut}`)
@@ -204,6 +290,15 @@ try {
     throw new Error(
       `Solo score input should allow decimal editing: empty=${soloScoreEmptyValue}, pending=${soloScoreDecimalPending}, typed=${soloScoreTypedValue}`,
     )
+  }
+  if (soloYearEmptyValue !== '' || soloYearTypedValue !== '1998') {
+    throw new Error(`Solo year input should allow direct editing: empty=${soloYearEmptyValue}, typed=${soloYearTypedValue}`)
+  }
+  if (totalBeforeSoloYearTyping !== totalAfterSoloYearTyping) {
+    throw new Error(`Typing in solo year input should not answer: ${totalBeforeSoloYearTyping} -> ${totalAfterSoloYearTyping}`)
+  }
+  if (soloQuickYearMin !== '1900' || soloQuickYearMax !== '2009' || soloQuickYearPressed !== 'true') {
+    throw new Error(`Solo year shortcut failed: ${soloQuickYearMin}-${soloQuickYearMax}`)
   }
   if (multiplayerPressed !== 'true' || !lobbyVisible) throw new Error('Multiplayer room UI did not open')
   if (!/^[A-Z2-9]{6}$/.test(roomCode)) throw new Error(`Unexpected room code: ${roomCode}`)
@@ -217,6 +312,20 @@ try {
     throw new Error('Timed room mode did not update copy or length')
   }
   if (roomScoreMax !== '4.9' || roomPool === '0 部') throw new Error('Room preset settings did not apply')
+  if (roomMangaPool === '0 部' || !roomMangaExcludesHidden || !roomMangaPresetsHidden) {
+    throw new Error(
+      `Room Manga pool did not switch cleanly: pool=${roomMangaPool}, excludes=${roomMangaExcludesHidden}, presets=${roomMangaPresetsHidden}`,
+    )
+  }
+  if (roomCompletedMangaPool === roomMangaPool || roomCompletedMangaPool === '0 部') {
+    throw new Error(`Room completed manga filter did not narrow pool: ${roomMangaPool} -> ${roomCompletedMangaPool}`)
+  }
+  if (roomGalgamePool === '0 部' || !roomGalgameExcludesHidden || !roomGalgamePresetsHidden) {
+    throw new Error(
+      `Room Galgame pool did not switch cleanly: pool=${roomGalgamePool}, excludes=${roomGalgameExcludesHidden}, presets=${roomGalgamePresetsHidden}`,
+    )
+  }
+  if (roomAdultGalgamePool === '0 部') throw new Error('Room adult Galgame filter returned an empty pool')
   if (
     roomScoreEmptyValue !== '' ||
     roomScoreDecimalPending !== '7.' ||

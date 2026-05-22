@@ -38,13 +38,29 @@ jobs:
 
       - name: Commit updated data
         run: |
-          if git diff --quiet -- public/anime-seed.json public/anime-seed-meta.json; then
+          if git diff --quiet -- \
+            public/anime-seed.json \
+            public/anime-seed-meta.json \
+            public/manga-seed.json \
+            public/manga-seed-meta.json \
+            public/light-novel-seed.json \
+            public/light-novel-seed-meta.json \
+            public/galgame-seed.json \
+            public/galgame-seed-meta.json; then
             echo "Bangumi data is already up to date."
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add public/anime-seed.json public/anime-seed-meta.json
+          git add \
+            public/anime-seed.json \
+            public/anime-seed-meta.json \
+            public/manga-seed.json \
+            public/manga-seed-meta.json \
+            public/light-novel-seed.json \
+            public/light-novel-seed-meta.json \
+            public/galgame-seed.json \
+            public/galgame-seed-meta.json
           git commit -m "Update Bangumi seed data"
           git push origin HEAD:${{ github.ref_name }}

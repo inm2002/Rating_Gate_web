@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "data:audit": "node scripts/audit-bangumi-pools.mjs",
     "data:seed": "node scripts/fetch-bangumi-seed.mjs",
     "dev": "vite",
     "dev:ws": "node scripts/ws-room-server.mjs",

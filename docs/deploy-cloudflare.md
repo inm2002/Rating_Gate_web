@@ -13,7 +13,7 @@ example.com
 
 生产环境未配置 `VITE_WS_URL` 时，前端默认连接当前域名下的 `wss://<host>/ws`。若站点部署在 `https://ratinggate.cn`，多人联机服务默认使用 `wss://ratinggate.cn/ws`。
 
-题库通过 GitHub Actions 在北京时间每周一 00:00 自动重新生成并提交到仓库。Cloudflare Pages 连接 GitHub 仓库后，会在数据提交后触发一次前端部署。
+动画、漫画、轻小说和 Galgame 题库通过 GitHub Actions 在北京时间每周一 00:00 自动重新生成并提交到仓库。Cloudflare Pages 连接 GitHub 仓库后，会在数据提交后触发一次前端部署。
 
 ## 计量优化策略
 
@@ -45,7 +45,7 @@ Pages 只负责部署前端静态资源，不应在 Pages 的 Deploy command 中
 VITE_WS_URL=wss://<站点域名>/ws
 ```
 
-仓库中的 `Update Bangumi Data` 工作流也可以在 GitHub Actions 页面手动运行，用于立即刷新题库并触发一次 Pages 部署。
+仓库中的 `Update Bangumi Data` 工作流也可以在 GitHub Actions 页面手动运行，用于立即刷新四类题库并触发一次 Pages 部署。
 
 ## Worker 部署
 
@@ -115,10 +115,13 @@ https://<站点域名>/ws
 随后验证页面功能：
 
 - 首页可以正常打开
-- 单人挑战可以加载题库并答题
+- 单人挑战可以切换动画、漫画、轻小说和 Galgame 题库并答题
+- 漫画与轻小说的媒体专属筛选可正常收窄题池
+- Galgame 全年龄/非全年龄筛选可用，非全年龄条目使用标题封面
 - 多人模式显示“联机已连接”
 - 浏览器 A 创建房间，浏览器 B 输入房间码加入
 - 房主开始比赛后，两端进入同一个比赛舞台
+- 房主切换题库后，其他玩家看到同步后的题库设置
 - 经典同步赛中，一方作答后卡片出现选中高亮
 - 双方作答后出现排名弹窗
 - 点击“回到大厅”后双方同步回到大厅

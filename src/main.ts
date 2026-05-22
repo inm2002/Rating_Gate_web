@@ -8,17 +8,22 @@ import {
   createDefaultSettings,
   createInitialRound,
   detectPreset,
-  filterAnime,
+  filterSubjects,
   judgeAnswer,
-  pickNextAnime,
+  mediaLabels,
+  mediaUnits,
+  pickNextSubject,
   titleOf,
   updateStats,
   yearOf,
-  type Anime,
   type ExcludeKey,
+  type GalgameAudience,
+  type MediaKind,
+  type MediaTagFilterKey,
   type Mode,
   type PresetName,
   type RankingFilter,
+  type RatedSubject,
   type Settings,
   type Side,
   type Stats,
@@ -26,11 +31,12 @@ import {
 
 type AppView = 'solo' | 'multiplayer'
 type Phase = 'loading' | 'ready' | 'playing' | 'reveal' | 'ended'
-type RoomYearRange = 'all' | 'before2010' | 'decade2010' | 'after2020'
+type YearRange = 'all' | 'before2010' | 'decade2010' | 'after2020'
 
-interface AnimeSeedMeta {
+interface SeedMeta {
   generatedAt: string
   source: string
+  mediaKind?: MediaKind
   count: number
 }
 
@@ -42,11 +48,11 @@ interface LocalRoom {
 
 type RoomStatus = 'lobby' | 'question' | 'reveal' | 'ended'
 
-type RemoteAnime = Omit<Anime, 'tags' | 'score'> & { score?: number }
+type RemoteSubject = Omit<RatedSubject, 'tags' | 'score'> & { score?: number }
 
 interface RemotePair {
-  left: RemoteAnime
-  right: RemoteAnime
+  left: RemoteSubject
+  right: RemoteSubject
 }
 
 interface RemotePlayer {
@@ -75,6 +81,7 @@ interface RemoteRoom {
   hostId: string
   status: RoomStatus
   mode: Mode
+  mediaKind: MediaKind
   length: number
   settings: Settings
   poolCount: number
@@ -104,9 +111,16 @@ const ROOM_WS_URL =
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('Missing #app')
 
-let allAnime: Anime[] = []
-let dataUpdatedAt = ''
-let pool: Anime[] = []
+const seedPaths: Record<MediaKind, { data: string; meta: string }> = {
+  anime: { data: '/anime-seed.json', meta: '/anime-seed-meta.json' },
+  manga: { data: '/manga-seed.json', meta: '/manga-seed-meta.json' },
+  lightNovel: { data: '/light-novel-seed.json', meta: '/light-novel-seed-meta.json' },
+  galgame: { data: '/galgame-seed.json', meta: '/galgame-seed-meta.json' },
+}
+const subjectCache = new Map<MediaKind, RatedSubject[]>()
+const dataUpdatedAt = new Map<MediaKind, string>()
+let subjects: RatedSubject[] = []
+let pool: RatedSubject[] = []
 let seen = new Set<number>()
 let appView: AppView = 'solo'
 let localRoom: LocalRoom | null = null
@@ -121,8 +135,8 @@ let roomMode: Mode = 'classic'
 let roomClassicRounds = 10
 let roomTimedSeconds = 90
 let phase: Phase = 'loading'
-let left: Anime | null = null
-let right: Anime | null = null
+let left: RatedSubject | null = null
+let right: RatedSubject | null = null
 let firstRound = true
 let selectedSide: Side | null = null
 let winningSide: Side | null = null
@@ -170,7 +184,7 @@ app.innerHTML = `
           <button class="ghost-button" id="restart" type="button">重新开始</button>
         </div>
         <div class="arena">
-          <button class="anime-card" id="card-left" type="button" aria-label="选择左侧动画">
+          <button class="anime-card" id="card-left" type="button" aria-label="选择左侧条目">
             <span class="poster-wrap" id="poster-left" data-loading="true">
               <span class="poster-fallback" id="poster-fallback-left">封面加载中</span>
               <img id="image-left" alt="" />
@@ -183,7 +197,7 @@ app.innerHTML = `
             <span class="result-chip" id="chip-left"></span>
           </button>
           <div class="versus" aria-hidden="true">VS</div>
-          <button class="anime-card" id="card-right" type="button" aria-label="选择右侧动画">
+          <button class="anime-card" id="card-right" type="button" aria-label="选择右侧条目">
             <span class="poster-wrap" id="poster-right" data-loading="true">
               <span class="poster-fallback" id="poster-fallback-right">封面加载中</span>
               <img id="image-right" alt="" />
@@ -212,7 +226,14 @@ app.innerHTML = `
             <span id="pool-count">0 部</span>
           </div>
 
-          <div class="preset-row" aria-label="筛选预设">
+          <div class="media-switch" aria-label="题库类型">
+            <button type="button" data-media-kind="anime" aria-pressed="true">动画</button>
+            <button type="button" data-media-kind="manga" aria-pressed="false">漫画</button>
+            <button type="button" data-media-kind="lightNovel" aria-pressed="false">轻小说</button>
+            <button type="button" data-media-kind="galgame" aria-pressed="false">Galgame</button>
+          </div>
+
+          <div class="preset-row" id="solo-anime-presets" aria-label="筛选预设">
             <button type="button" data-preset="standard">标准</button>
             <button type="button" data-preset="akashi">赤石大王</button>
             <button type="button" data-preset="brahmin">婆罗门</button>
@@ -220,7 +241,7 @@ app.innerHTML = `
 
           <label class="control-field">
             <span>最低投票</span>
-            <input id="min-votes" type="range" min="100" max="5000" step="100" value="100" />
+            <input id="min-votes" type="range" min="50" max="5000" step="50" value="100" />
             <output id="min-votes-label">100</output>
           </label>
 
@@ -235,15 +256,23 @@ app.innerHTML = `
             </label>
           </div>
 
-          <div class="range-row">
-            <label class="control-field">
-              <span>起始年份</span>
-              <input id="year-min" type="number" min="1900" max="2030" value="1900" />
-            </label>
-            <label class="control-field">
-              <span>结束年份</span>
-              <input id="year-max" type="number" min="1900" max="2030" value="${new Date().getFullYear()}" />
-            </label>
+          <div class="year-filter">
+            <div class="range-row">
+              <label class="control-field">
+                <span>起始年份</span>
+                <input id="year-min" class="year-input" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" value="1900" autocomplete="off" />
+              </label>
+              <label class="control-field">
+                <span>结束年份</span>
+                <input id="year-max" class="year-input" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" value="${new Date().getFullYear()}" autocomplete="off" />
+              </label>
+            </div>
+            <div class="year-shortcuts" aria-label="年份快捷选择">
+              <button type="button" data-year-range="all">全量</button>
+              <button type="button" data-year-range="before2010">2010 前</button>
+              <button type="button" data-year-range="decade2010">2010-2019</button>
+              <button type="button" data-year-range="after2020">2020 后</button>
+            </div>
           </div>
 
           <label class="control-field">
@@ -257,7 +286,16 @@ app.innerHTML = `
             </select>
           </label>
 
-          <fieldset class="exclude-set">
+          <fieldset class="galgame-audience-set" id="solo-galgame-audience" hidden>
+            <legend>Galgame 年龄</legend>
+            <div class="audience-switch" aria-label="Galgame 年龄筛选">
+              <button type="button" data-galgame-audience="all" aria-pressed="true">全部</button>
+              <button type="button" data-galgame-audience="allAges" aria-pressed="false">全年龄</button>
+              <button type="button" data-galgame-audience="adult" aria-pressed="false">非全年龄</button>
+            </div>
+          </fieldset>
+
+          <fieldset class="exclude-set" id="solo-anime-excludes">
             <legend>排除</legend>
             <div class="toggle-grid">
               <label><input id="exclude-guochan" type="checkbox" checked /><span>国产</span></label>
@@ -267,6 +305,25 @@ app.innerHTML = `
               <label><input id="exclude-oumei" type="checkbox" checked /><span>欧美</span></label>
               <label><input id="exclude-short" type="checkbox" /><span>短片</span></label>
               <label><input id="exclude-recap" type="checkbox" checked /><span>总集篇</span></label>
+            </div>
+          </fieldset>
+
+          <fieldset class="exclude-set" id="solo-manga-filters" hidden>
+            <legend>漫画筛选</legend>
+            <div class="toggle-grid">
+              <label><input id="manga-filter-short" type="checkbox" /><span>排除短篇</span></label>
+              <label><input id="manga-filter-medium" type="checkbox" /><span>排除中篇</span></label>
+              <label><input id="manga-filter-four-panel" type="checkbox" /><span>排除四格</span></label>
+              <label><input id="manga-filter-completed" type="checkbox" /><span>只看已完结</span></label>
+              <label><input id="manga-filter-novel-adapted" type="checkbox" /><span>排除小说改</span></label>
+            </div>
+          </fieldset>
+
+          <fieldset class="exclude-set" id="solo-light-novel-filters" hidden>
+            <legend>轻小说筛选</legend>
+            <div class="toggle-grid">
+              <label><input id="light-novel-filter-web" type="checkbox" /><span>排除 Web 小说</span></label>
+              <label><input id="light-novel-filter-completed" type="checkbox" /><span>只看已完结</span></label>
             </div>
           </fieldset>
         </section>
@@ -332,6 +389,12 @@ app.innerHTML = `
               <h3>比赛设置</h3>
               <span id="room-mode-label">经典</span>
             </div>
+            <div class="room-media-switch" aria-label="房间题库类型">
+              <button type="button" data-room-media-kind="anime" aria-pressed="true">动画</button>
+              <button type="button" data-room-media-kind="manga" aria-pressed="false">漫画</button>
+              <button type="button" data-room-media-kind="lightNovel" aria-pressed="false">轻小说</button>
+              <button type="button" data-room-media-kind="galgame" aria-pressed="false">Galgame</button>
+            </div>
             <div class="room-mode-switch" aria-label="房间比赛模式">
               <button id="room-mode-classic" type="button" aria-pressed="true">经典同步</button>
               <button id="room-mode-timed" type="button" aria-pressed="false">限时冲分</button>
@@ -343,7 +406,7 @@ app.innerHTML = `
               <input id="room-length-input" type="number" min="1" max="50" step="1" value="10" />
             </label>
 
-            <div class="room-preset-row" aria-label="房间筛选预设">
+            <div class="room-preset-row" id="room-anime-presets" aria-label="房间筛选预设">
               <button type="button" data-room-preset="standard">标准</button>
               <button type="button" data-room-preset="akashi">赤石大王</button>
               <button type="button" data-room-preset="brahmin">婆罗门</button>
@@ -351,7 +414,7 @@ app.innerHTML = `
 
             <label class="control-field">
               <span>最低投票</span>
-              <input id="room-min-votes" type="range" min="100" max="5000" step="100" value="100" />
+              <input id="room-min-votes" type="range" min="50" max="5000" step="50" value="100" />
               <output id="room-min-votes-label">100</output>
             </label>
 
@@ -396,7 +459,16 @@ app.innerHTML = `
               </select>
             </label>
 
-            <fieldset class="exclude-set">
+            <fieldset class="galgame-audience-set" id="room-galgame-audience" hidden>
+              <legend>Galgame 年龄</legend>
+              <div class="room-audience-switch" aria-label="房间 Galgame 年龄筛选">
+                <button type="button" data-room-galgame-audience="all" aria-pressed="true">全部</button>
+                <button type="button" data-room-galgame-audience="allAges" aria-pressed="false">全年龄</button>
+                <button type="button" data-room-galgame-audience="adult" aria-pressed="false">非全年龄</button>
+              </div>
+            </fieldset>
+
+            <fieldset class="exclude-set" id="room-anime-excludes">
               <legend>排除</legend>
               <div class="toggle-grid">
                 <label><input id="room-exclude-guochan" type="checkbox" checked /><span>国产</span></label>
@@ -406,6 +478,25 @@ app.innerHTML = `
                 <label><input id="room-exclude-oumei" type="checkbox" checked /><span>欧美</span></label>
                 <label><input id="room-exclude-short" type="checkbox" /><span>短片</span></label>
                 <label><input id="room-exclude-recap" type="checkbox" checked /><span>总集篇</span></label>
+              </div>
+            </fieldset>
+
+            <fieldset class="exclude-set" id="room-manga-filters" hidden>
+              <legend>漫画筛选</legend>
+              <div class="toggle-grid">
+                <label><input id="room-manga-filter-short" type="checkbox" /><span>排除短篇</span></label>
+                <label><input id="room-manga-filter-medium" type="checkbox" /><span>排除中篇</span></label>
+                <label><input id="room-manga-filter-four-panel" type="checkbox" /><span>排除四格</span></label>
+                <label><input id="room-manga-filter-completed" type="checkbox" /><span>只看已完结</span></label>
+                <label><input id="room-manga-filter-novel-adapted" type="checkbox" /><span>排除小说改</span></label>
+              </div>
+            </fieldset>
+
+            <fieldset class="exclude-set" id="room-light-novel-filters" hidden>
+              <legend>轻小说筛选</legend>
+              <div class="toggle-grid">
+                <label><input id="room-light-novel-filter-web" type="checkbox" /><span>排除 Web 小说</span></label>
+                <label><input id="room-light-novel-filter-completed" type="checkbox" /><span>只看已完结</span></label>
               </div>
             </fieldset>
 
@@ -435,27 +526,27 @@ app.innerHTML = `
             </div>
           </div>
           <div class="arena">
-            <button class="anime-card" id="room-answer-left" type="button" aria-label="选择左侧动画">
+            <button class="anime-card" id="room-answer-left" type="button" aria-label="选择左侧条目">
               <span class="poster-wrap" id="room-poster-left" data-loading="true">
                 <span class="poster-fallback" id="room-poster-fallback-left">封面加载中</span>
                 <img id="room-image-left" alt="" />
               </span>
               <span class="card-copy">
                 <span class="card-meta" id="room-meta-left"></span>
-                <strong id="room-title-left">左侧动画</strong>
+                <strong id="room-title-left">左侧条目</strong>
                 <span class="score-line" id="room-score-left">?</span>
               </span>
               <span class="result-chip" id="room-chip-left"></span>
             </button>
             <div class="versus" aria-hidden="true">VS</div>
-            <button class="anime-card" id="room-answer-right" type="button" aria-label="选择右侧动画">
+            <button class="anime-card" id="room-answer-right" type="button" aria-label="选择右侧条目">
               <span class="poster-wrap" id="room-poster-right" data-loading="true">
                 <span class="poster-fallback" id="room-poster-fallback-right">封面加载中</span>
                 <img id="room-image-right" alt="" />
               </span>
               <span class="card-copy">
                 <span class="card-meta" id="room-meta-right"></span>
-                <strong id="room-title-right">右侧动画</strong>
+                <strong id="room-title-right">右侧条目</strong>
                 <span class="score-line" id="room-score-right">?</span>
               </span>
               <span class="result-chip" id="room-chip-right"></span>
@@ -466,6 +557,7 @@ app.innerHTML = `
         <aside class="side-panel room-side-panel">
           <section class="scoreboard room-scoreboard" aria-label="联机比赛状态">
             <div class="metric"><span id="room-info-code">------</span><small>房间</small></div>
+            <div class="metric"><span id="room-info-media">动画</span><small>题库</small></div>
             <div class="metric"><span id="room-info-mode">经典</span><small>模式</small></div>
             <div class="metric"><span id="room-info-progress">0/0</span><small>进度</small></div>
             <div class="metric"><span id="room-info-players">0/8</span><small>玩家</small></div>
@@ -569,7 +661,9 @@ const byId = {
   timedBackClassic: $('timed-back-classic') as HTMLButtonElement,
   timedStart: $('timed-start') as HTMLButtonElement,
   dataUpdated: $('data-updated'),
+  soloAnimePresets: $('solo-anime-presets'),
   presetButtons: [...document.querySelectorAll<HTMLButtonElement>('[data-preset]')],
+  mediaButtons: [...document.querySelectorAll<HTMLButtonElement>('[data-media-kind]')],
   metricLives: $('metric-lives'),
   metricStreak: $('metric-streak'),
   metricTotal: $('metric-total'),
@@ -581,7 +675,11 @@ const byId = {
   scoreMax: $('score-max') as HTMLInputElement,
   yearMin: $('year-min') as HTMLInputElement,
   yearMax: $('year-max') as HTMLInputElement,
+  yearButtons: [...document.querySelectorAll<HTMLButtonElement>('[data-year-range]')],
   ranking: $('ranking') as HTMLSelectElement,
+  soloGalgameAudience: $('solo-galgame-audience'),
+  galgameAudienceButtons: [...document.querySelectorAll<HTMLButtonElement>('[data-galgame-audience]')],
+  soloAnimeExcludes: $('solo-anime-excludes'),
   playerName: $('player-name') as HTMLInputElement,
   roomCodeInput: $('room-code-input') as HTMLInputElement,
   roomEntryState: $('room-entry-state'),
@@ -597,11 +695,13 @@ const byId = {
   copyRoomCode: $('copy-room-code') as HTMLButtonElement,
   roomStatus: $('room-status'),
   roomModeLabel: $('room-mode-label'),
+  roomMediaButtons: [...document.querySelectorAll<HTMLButtonElement>('[data-room-media-kind]')],
   roomModeClassic: $('room-mode-classic') as HTMLButtonElement,
   roomModeTimed: $('room-mode-timed') as HTMLButtonElement,
   roomModeNote: $('room-mode-note'),
   roomLengthLabel: $('room-length-label'),
   roomLengthInput: $('room-length-input') as HTMLInputElement,
+  roomAnimePresets: $('room-anime-presets'),
   roomPresetButtons: [...document.querySelectorAll<HTMLButtonElement>('[data-room-preset]')],
   roomMinVotes: $('room-min-votes') as HTMLInputElement,
   roomMinVotesLabel: $('room-min-votes-label') as HTMLOutputElement,
@@ -611,6 +711,11 @@ const byId = {
   roomYearMax: $('room-year-max') as HTMLInputElement,
   roomYearButtons: [...document.querySelectorAll<HTMLButtonElement>('[data-room-year-range]')],
   roomRanking: $('room-ranking') as HTMLSelectElement,
+  roomGalgameAudience: $('room-galgame-audience'),
+  roomGalgameAudienceButtons: [...document.querySelectorAll<HTMLButtonElement>('[data-room-galgame-audience]')],
+  roomAnimeExcludes: $('room-anime-excludes'),
+  roomMangaFilters: $('room-manga-filters'),
+  roomLightNovelFilters: $('room-light-novel-filters'),
   roomPool: $('room-pool'),
   roomLength: $('room-length'),
   roomPlayerCount: $('room-player-count'),
@@ -635,6 +740,7 @@ const byId = {
   roomChipLeft: $('room-chip-left'),
   roomChipRight: $('room-chip-right'),
   roomInfoCode: $('room-info-code'),
+  roomInfoMedia: $('room-info-media'),
   roomInfoMode: $('room-info-mode'),
   roomInfoProgress: $('room-info-progress'),
   roomInfoPlayers: $('room-info-players'),
@@ -658,6 +764,15 @@ const byId = {
     short: $('room-exclude-short') as HTMLInputElement,
     recap: $('room-exclude-recap') as HTMLInputElement,
   } satisfies Record<ExcludeKey, HTMLInputElement>,
+  roomTagFilters: {
+    mangaShort: $('room-manga-filter-short') as HTMLInputElement,
+    mangaMedium: $('room-manga-filter-medium') as HTMLInputElement,
+    mangaFourPanel: $('room-manga-filter-four-panel') as HTMLInputElement,
+    mangaCompleted: $('room-manga-filter-completed') as HTMLInputElement,
+    mangaNovelAdapted: $('room-manga-filter-novel-adapted') as HTMLInputElement,
+    lightNovelWeb: $('room-light-novel-filter-web') as HTMLInputElement,
+    lightNovelCompleted: $('room-light-novel-filter-completed') as HTMLInputElement,
+  } satisfies Record<MediaTagFilterKey, HTMLInputElement>,
   excludes: {
     guochan: $('exclude-guochan') as HTMLInputElement,
     movies: $('exclude-movies') as HTMLInputElement,
@@ -667,6 +782,17 @@ const byId = {
     short: $('exclude-short') as HTMLInputElement,
     recap: $('exclude-recap') as HTMLInputElement,
   } satisfies Record<ExcludeKey, HTMLInputElement>,
+  soloMangaFilters: $('solo-manga-filters'),
+  soloLightNovelFilters: $('solo-light-novel-filters'),
+  tagFilters: {
+    mangaShort: $('manga-filter-short') as HTMLInputElement,
+    mangaMedium: $('manga-filter-medium') as HTMLInputElement,
+    mangaFourPanel: $('manga-filter-four-panel') as HTMLInputElement,
+    mangaCompleted: $('manga-filter-completed') as HTMLInputElement,
+    mangaNovelAdapted: $('manga-filter-novel-adapted') as HTMLInputElement,
+    lightNovelWeb: $('light-novel-filter-web') as HTMLInputElement,
+    lightNovelCompleted: $('light-novel-filter-completed') as HTMLInputElement,
+  } satisfies Record<MediaTagFilterKey, HTMLInputElement>,
 }
 
 function getBest(modeName: Mode) {
@@ -728,9 +854,55 @@ function formatUpdatedAt(value: string) {
   })
 }
 
+function questionFor(mediaKind: MediaKind) {
+  return `哪部${mediaLabels[mediaKind]}评分更高？`
+}
+
+function mediaFallback(mediaKind: MediaKind) {
+  return mediaKind === 'galgame' ? '游戏' : mediaLabels[mediaKind]
+}
+
+function normalizeSubjectMediaKind(subject: RatedSubject, mediaKind: MediaKind) {
+  return { ...subject, mediaKind: subject.mediaKind ?? mediaKind, adult: Boolean(subject.adult) }
+}
+
+async function loadSubjects(mediaKind: MediaKind) {
+  const cached = subjectCache.get(mediaKind)
+  if (cached) return cached
+  const paths = seedPaths[mediaKind]
+  const [response, metaResponse] = await Promise.all([fetch(paths.data), fetch(paths.meta)])
+  if (!response.ok) throw new Error(`${mediaLabels[mediaKind]} seed HTTP ${response.status}`)
+  const nextSubjects = ((await response.json()) as RatedSubject[]).map((subject) =>
+    normalizeSubjectMediaKind(subject, mediaKind),
+  )
+  subjectCache.set(mediaKind, nextSubjects)
+  if (metaResponse.ok) {
+    const meta = (await metaResponse.json()) as SeedMeta
+    dataUpdatedAt.set(mediaKind, formatUpdatedAt(meta.generatedAt))
+  } else {
+    dataUpdatedAt.set(mediaKind, formatUpdatedAt(response.headers.get('last-modified') ?? ''))
+  }
+  return nextSubjects
+}
+
+async function useSoloMediaKind(mediaKind: MediaKind) {
+  try {
+    subjects = await loadSubjects(mediaKind)
+    settings = createDefaultSettings(mediaKind)
+    activePreset = 'standard'
+    setSoloControlsFromSettings(settings)
+    restartGame()
+  } catch (error) {
+    console.error(error)
+    setPrompt(`未找到${mediaLabels[mediaKind]}题库，请先运行 npm run data:seed。`, 'bad')
+    phase = 'ended'
+    render()
+  }
+}
+
 function applyFilters() {
-  pool = filterAnime(allAnime, settings)
-  byId.poolCount.textContent = `${pool.length} 部`
+  pool = filterSubjects(subjects, settings)
+  byId.poolCount.textContent = `${pool.length} ${mediaUnits[settings.mediaKind]}`
   renderRoomSettings()
 }
 
@@ -805,6 +977,22 @@ function setRoomConnectionState(label: string, tone: 'neutral' | 'bad' = 'neutra
   byId.roomEntryState.dataset.tone = tone
 }
 
+function normalizeRemoteRoom(room: RemoteRoom): RemoteRoom {
+  const mediaKind = room.mediaKind ?? room.settings.mediaKind ?? 'anime'
+  const defaults = createDefaultSettings(mediaKind)
+  return {
+    ...room,
+    mediaKind,
+    settings: {
+      ...defaults,
+      ...room.settings,
+      mediaKind,
+      excludes: { ...defaults.excludes, ...room.settings.excludes },
+      tagFilters: { ...defaults.tagFilters, ...room.settings.tagFilters },
+    },
+  }
+}
+
 function handleRoomMessage(event: MessageEvent<string>) {
   const message = JSON.parse(event.data) as
     | { type: 'connected' }
@@ -822,7 +1010,7 @@ function handleRoomMessage(event: MessageEvent<string>) {
     return
   }
   if (message.type === 'roomState') {
-    remoteRoom = message.room
+    remoteRoom = normalizeRemoteRoom(message.room)
     if (remoteRoom.status === 'lobby') {
       remoteGame = null
       window.clearInterval(roomClockTimer)
@@ -837,9 +1025,10 @@ function handleRoomMessage(event: MessageEvent<string>) {
     roomMode = remoteRoom.mode
     if (roomMode === 'classic') roomClassicRounds = remoteRoom.length
     else roomTimedSeconds = remoteRoom.length
-    roomSettings = remoteRoom.settings
+    roomSettings = { ...remoteRoom.settings, mediaKind: remoteRoom.mediaKind }
     activeRoomPreset = detectPreset(roomSettings)
     setRoomControlsFromSettings(roomSettings)
+    void loadSubjects(roomSettings.mediaKind).then(() => renderRoomSettings()).catch(console.error)
     renderRoom()
     return
   }
@@ -922,18 +1111,24 @@ function pushRoomSettings() {
   if (!remoteRoom || localRoom?.role !== '房主' || remoteRoom.status !== 'lobby') return
   sendRoomMessage({
     type: 'updateSettings',
+    mediaKind: roomSettings.mediaKind,
     mode: roomMode,
     settings: roomSettings,
     ...roomLengthPayload(),
   })
 }
 
-function titleOfRemote(anime: RemoteAnime) {
-  return anime.nameCn || anime.name
+function titleOfRemote(subject: RemoteSubject) {
+  return subject.nameCn || subject.name
 }
 
-function yearOfRemote(anime: RemoteAnime) {
-  const year = Number.parseInt(anime.date.slice(0, 4), 10)
+function fallbackTextOfRemote(subject: RemoteSubject) {
+  const title = titleOfRemote(subject).trim()
+  return subject.adult ? title || '作品名' : title.slice(0, 2) || '封面'
+}
+
+function yearOfRemote(subject: RemoteSubject) {
+  const year = Number.parseInt(subject.date.slice(0, 4), 10)
   return Number.isFinite(year) ? year : 0
 }
 
@@ -989,7 +1184,7 @@ function renderRoom() {
   byId.roomPlayerList.innerHTML = `${playerRows}${waitingRow}`
   byId.roomBattlePlayerList.innerHTML = playerRows
   byId.roomStart.disabled = localRoom.role !== '房主' || room.status !== 'lobby' || room.poolCount < 2
-  byId.roomPool.textContent = `${room.poolCount} 部`
+  byId.roomPool.textContent = `${room.poolCount} ${mediaUnits[room.mediaKind]}`
   renderRoomMatch()
 }
 
@@ -1007,47 +1202,59 @@ function roomCard(side: Side) {
 }
 
 function renderRoomSide(side: Side, pair: RemotePair | null, reveal: RemoteReveal | null) {
-  const anime = pair?.[side]
+  const subject = pair?.[side]
   const view = roomCard(side)
   view.root.className = 'anime-card'
   view.chip.className = 'result-chip'
   view.chip.textContent = ''
   view.poster.dataset.loading = 'false'
   view.poster.dataset.failed = 'false'
+  view.poster.dataset.titleCover = 'false'
   view.fallback.textContent = '封面加载中'
-  if (!anime) {
+  if (!subject) {
     view.root.disabled = true
     view.meta.textContent = ''
     view.title.textContent = '暂无题目'
     view.score.textContent = '-'
     view.fallback.textContent = '暂无封面'
+    view.image.hidden = true
     view.image.removeAttribute('data-anime-id')
     view.image.removeAttribute('src')
     return
   }
   view.poster.dataset.loading = 'true'
-  view.image.dataset.animeId = String(anime.id)
-  view.fallback.textContent = titleOfRemote(anime).trim().slice(0, 2) || '封面'
+  view.image.dataset.animeId = String(subject.id)
+  view.fallback.textContent = fallbackTextOfRemote(subject)
+  if (!subject.image) {
+    view.poster.dataset.loading = 'false'
+    view.poster.dataset.failed = 'true'
+    view.poster.dataset.titleCover = 'true'
+    view.image.hidden = true
+    view.image.removeAttribute('src')
+    view.image.alt = ''
+  } else {
+  view.image.hidden = false
   view.image.onload = () => {
-    if (view.image.dataset.animeId === String(anime.id)) view.poster.dataset.loading = 'false'
+    if (view.image.dataset.animeId === String(subject.id)) view.poster.dataset.loading = 'false'
   }
   view.image.onerror = () => {
-    if (view.image.dataset.animeId === String(anime.id)) {
+    if (view.image.dataset.animeId === String(subject.id)) {
       view.poster.dataset.loading = 'false'
       view.poster.dataset.failed = 'true'
       view.image.removeAttribute('src')
     }
   }
-  if (view.image.src !== anime.image) {
-    view.image.src = anime.image
+  if (view.image.src !== subject.image) {
+    view.image.src = subject.image
   } else if (view.image.complete && view.image.naturalWidth > 0) {
     view.poster.dataset.loading = 'false'
   }
-  view.image.alt = `${titleOfRemote(anime)} 封面`
-  view.meta.textContent = `${yearOfRemote(anime) || '未知'} · ${anime.platform || '动画'} · ${(anime.votes ?? 0).toLocaleString()} votes`
-  view.title.textContent = titleOfRemote(anime)
-  view.score.textContent = typeof anime.score === 'number' ? anime.score.toFixed(1) : '?'
-  view.score.classList.toggle('hidden-score', typeof anime.score !== 'number')
+  }
+  view.image.alt = `${titleOfRemote(subject)} 封面`
+  view.meta.textContent = `${yearOfRemote(subject) || '未知'} · ${subject.platform || mediaFallback(subject.mediaKind)} · ${(subject.votes ?? 0).toLocaleString()} votes`
+  view.title.textContent = titleOfRemote(subject)
+  view.score.textContent = typeof subject.score === 'number' ? subject.score.toFixed(1) : '?'
+  view.score.classList.toggle('hidden-score', typeof subject.score !== 'number')
   const revealWinner = reveal?.winningSide === side
   const selected = reveal?.selectedSide === side
   view.root.classList.toggle('is-selected', selected)
@@ -1086,9 +1293,10 @@ function renderRoomMatch() {
         ? `剩余 ${Math.max(0, Math.ceil((timedEndsAt - Date.now()) / 1000))} 秒`
         : '限时冲分'
 
-  byId.roomMatchTitle.textContent = room.mode === 'classic' ? '经典同步赛' : '限时冲分赛'
+  byId.roomMatchTitle.textContent = `${mediaLabels[room.mediaKind]}${room.mode === 'classic' ? '经典同步赛' : '限时冲分赛'}`
   byId.roomMatchState.textContent = room.status === 'ended' ? '比赛结束' : progress
   byId.roomInfoCode.textContent = room.code
+  byId.roomInfoMedia.textContent = mediaLabels[room.mediaKind]
   byId.roomInfoMode.textContent = room.mode === 'classic' ? '经典' : '限时'
   byId.roomInfoProgress.textContent = room.mode === 'classic' ? `${Math.min(game.round, game.length)}/${game.length}` : progress
   byId.roomInfoPlayers.textContent = `${room.players.length}/8`
@@ -1154,7 +1362,7 @@ function clampYear(value: number) {
   return Math.max(YEAR_MIN_LIMIT, Math.min(YEAR_MAX_LIMIT, value))
 }
 
-function readRoomYear(input: HTMLInputElement, fallback: number) {
+function readYear(input: HTMLInputElement, fallback: number) {
   const value = Number.parseInt(input.value, 10)
   return Number.isFinite(value) ? clampYear(value) : fallback
 }
@@ -1165,18 +1373,34 @@ function renderRoomPresetState() {
   })
 }
 
-function detectRoomYearRange(): RoomYearRange | null {
+function detectYearRange(yearMin: number, yearMax: number): YearRange | null {
   const currentYear = new Date().getFullYear()
-  if (roomSettings.yearMin === YEAR_MIN_LIMIT && roomSettings.yearMax === currentYear) return 'all'
-  if (roomSettings.yearMin === YEAR_MIN_LIMIT && roomSettings.yearMax === 2009) return 'before2010'
-  if (roomSettings.yearMin === 2010 && roomSettings.yearMax === 2019) return 'decade2010'
-  if (roomSettings.yearMin === 2020 && roomSettings.yearMax === currentYear) return 'after2020'
+  if (yearMin === YEAR_MIN_LIMIT && yearMax === currentYear) return 'all'
+  if (yearMin === YEAR_MIN_LIMIT && yearMax === 2009) return 'before2010'
+  if (yearMin === 2010 && yearMax === 2019) return 'decade2010'
+  if (yearMin === 2020 && yearMax === currentYear) return 'after2020'
   return null
 }
 
-function renderRoomYearShortcutState(activeRange = detectRoomYearRange()) {
+function yearRangeValues(range: YearRange): [number, number] {
+  const currentYear = new Date().getFullYear()
+  return {
+    all: [YEAR_MIN_LIMIT, currentYear],
+    before2010: [YEAR_MIN_LIMIT, 2009],
+    decade2010: [2010, 2019],
+    after2020: [2020, currentYear],
+  }[range] as [number, number]
+}
+
+function renderRoomYearShortcutState(activeRange = detectYearRange(roomSettings.yearMin, roomSettings.yearMax)) {
   byId.roomYearButtons.forEach((button) => {
     button.setAttribute('aria-pressed', activeRange === button.dataset.roomYearRange ? 'true' : 'false')
+  })
+}
+
+function renderSoloYearShortcutState(activeRange = detectYearRange(settings.yearMin, settings.yearMax)) {
+  byId.yearButtons.forEach((button) => {
+    button.setAttribute('aria-pressed', activeRange === button.dataset.yearRange ? 'true' : 'false')
   })
 }
 
@@ -1193,19 +1417,66 @@ function setRoomControlsFromSettings(nextSettings: Settings, options: { forceSco
     byId.roomYearMax.value = String(nextSettings.yearMax)
   }
   byId.roomRanking.value = nextSettings.ranking
+  byId.roomMediaButtons.forEach((button) => {
+    button.setAttribute('aria-pressed', button.dataset.roomMediaKind === nextSettings.mediaKind ? 'true' : 'false')
+  })
+  byId.roomAnimePresets.hidden = nextSettings.mediaKind !== 'anime'
+  byId.roomAnimeExcludes.hidden = nextSettings.mediaKind !== 'anime'
+  byId.roomMangaFilters.hidden = nextSettings.mediaKind !== 'manga'
+  byId.roomLightNovelFilters.hidden = nextSettings.mediaKind !== 'lightNovel'
+  byId.roomGalgameAudience.hidden = nextSettings.mediaKind !== 'galgame'
+  byId.roomGalgameAudienceButtons.forEach((button) => {
+    button.setAttribute(
+      'aria-pressed',
+      button.dataset.roomGalgameAudience === nextSettings.galgameAudience ? 'true' : 'false',
+    )
+  })
   ;(Object.keys(byId.roomExcludes) as ExcludeKey[]).forEach((key) => {
     byId.roomExcludes[key].checked = nextSettings.excludes[key]
+  })
+  ;(Object.keys(byId.roomTagFilters) as MediaTagFilterKey[]).forEach((key) => {
+    byId.roomTagFilters[key].checked = nextSettings.tagFilters[key]
+  })
+}
+
+function setSoloControlsFromSettings(nextSettings: Settings) {
+  byId.minVotes.value = String(nextSettings.minVotes)
+  byId.minVotesLabel.textContent = String(nextSettings.minVotes)
+  byId.scoreMin.value = formatScoreInput(nextSettings.scoreMin)
+  byId.scoreMax.value = formatScoreInput(nextSettings.scoreMax)
+  byId.yearMin.value = String(nextSettings.yearMin)
+  byId.yearMax.value = String(nextSettings.yearMax)
+  renderSoloYearShortcutState(detectYearRange(nextSettings.yearMin, nextSettings.yearMax))
+  byId.ranking.value = nextSettings.ranking
+  byId.soloAnimePresets.hidden = nextSettings.mediaKind !== 'anime'
+  byId.soloAnimeExcludes.hidden = nextSettings.mediaKind !== 'anime'
+  byId.soloMangaFilters.hidden = nextSettings.mediaKind !== 'manga'
+  byId.soloLightNovelFilters.hidden = nextSettings.mediaKind !== 'lightNovel'
+  byId.soloGalgameAudience.hidden = nextSettings.mediaKind !== 'galgame'
+  byId.mediaButtons.forEach((button) => {
+    button.setAttribute('aria-pressed', button.dataset.mediaKind === nextSettings.mediaKind ? 'true' : 'false')
+  })
+  byId.galgameAudienceButtons.forEach((button) => {
+    button.setAttribute('aria-pressed', button.dataset.galgameAudience === nextSettings.galgameAudience ? 'true' : 'false')
+  })
+  ;(Object.keys(byId.excludes) as ExcludeKey[]).forEach((key) => {
+    byId.excludes[key].checked = nextSettings.excludes[key]
+  })
+  ;(Object.keys(byId.tagFilters) as MediaTagFilterKey[]).forEach((key) => {
+    byId.tagFilters[key].checked = nextSettings.tagFilters[key]
   })
 }
 
 function syncRoomSettings(options: { normalizeScores?: boolean } = {}) {
   roomSettings = {
+    mediaKind: roomSettings.mediaKind,
     minVotes: Number.parseInt(byId.roomMinVotes.value, 10),
     scoreMin: readScore(byId.roomScoreMin, roomSettings.scoreMin),
     scoreMax: readScore(byId.roomScoreMax, roomSettings.scoreMax),
-    yearMin: readRoomYear(byId.roomYearMin, roomSettings.yearMin),
-    yearMax: readRoomYear(byId.roomYearMax, roomSettings.yearMax),
+    yearMin: readYear(byId.roomYearMin, roomSettings.yearMin),
+    yearMax: readYear(byId.roomYearMax, roomSettings.yearMax),
     ranking: byId.roomRanking.value as RankingFilter,
+    galgameAudience: roomSettings.galgameAudience,
     excludes: {
       guochan: byId.roomExcludes.guochan.checked,
       movies: byId.roomExcludes.movies.checked,
@@ -1214,6 +1485,15 @@ function syncRoomSettings(options: { normalizeScores?: boolean } = {}) {
       oumei: byId.roomExcludes.oumei.checked,
       short: byId.roomExcludes.short.checked,
       recap: byId.roomExcludes.recap.checked,
+    },
+    tagFilters: {
+      mangaShort: byId.roomTagFilters.mangaShort.checked,
+      mangaMedium: byId.roomTagFilters.mangaMedium.checked,
+      mangaFourPanel: byId.roomTagFilters.mangaFourPanel.checked,
+      mangaCompleted: byId.roomTagFilters.mangaCompleted.checked,
+      mangaNovelAdapted: byId.roomTagFilters.mangaNovelAdapted.checked,
+      lightNovelWeb: byId.roomTagFilters.lightNovelWeb.checked,
+      lightNovelCompleted: byId.roomTagFilters.lightNovelCompleted.checked,
     },
   }
   if (roomSettings.scoreMin > roomSettings.scoreMax) {
@@ -1246,8 +1526,8 @@ function commitRoomScores() {
 }
 
 function commitRoomYears(options: { normalize?: boolean } = {}) {
-  const yearMin = readRoomYear(byId.roomYearMin, roomSettings.yearMin)
-  const yearMax = readRoomYear(byId.roomYearMax, roomSettings.yearMax)
+  const yearMin = readYear(byId.roomYearMin, roomSettings.yearMin)
+  const yearMax = readYear(byId.roomYearMax, roomSettings.yearMax)
   const nextMin = Math.min(yearMin, yearMax)
   const nextMax = Math.max(yearMin, yearMax)
   if (options.normalize) {
@@ -1267,15 +1547,8 @@ function handleRoomYearInput(input: HTMLInputElement) {
   if (isCompleteYear(minValue) && isCompleteYear(maxValue)) commitRoomYears()
 }
 
-function applyRoomYearRange(range: RoomYearRange) {
-  const currentYear = new Date().getFullYear()
-  const ranges: Record<RoomYearRange, [number, number]> = {
-    all: [YEAR_MIN_LIMIT, currentYear],
-    before2010: [YEAR_MIN_LIMIT, 2009],
-    decade2010: [2010, 2019],
-    after2020: [2020, currentYear],
-  }
-  const [yearMin, yearMax] = ranges[range]
+function applyRoomYearRange(range: YearRange) {
+  const [yearMin, yearMax] = yearRangeValues(range)
   byId.roomYearMin.value = String(yearMin)
   byId.roomYearMax.value = String(yearMax)
   commitRoomYears()
@@ -1293,8 +1566,9 @@ function syncRoomLength() {
 }
 
 function renderRoomSettings() {
-  const roomPool = filterAnime(allAnime, roomSettings)
-  byId.roomPool.textContent = `${roomPool.length} 部`
+  const roomPool = filterSubjects(subjectCache.get(roomSettings.mediaKind) ?? [], roomSettings)
+  const roomPoolCount = remoteRoom?.settings.mediaKind === roomSettings.mediaKind ? remoteRoom.poolCount : roomPool.length
+  byId.roomPool.textContent = `${roomPoolCount} ${mediaUnits[roomSettings.mediaKind]}`
   byId.roomModeLabel.textContent = roomMode === 'classic' ? '经典同步' : '限时冲分'
   byId.roomLengthLabel.textContent = roomMode === 'classic' ? '比赛题数' : '比赛秒数'
   byId.roomLengthInput.min = roomMode === 'classic' ? '1' : '30'
@@ -1313,26 +1587,52 @@ function renderRoomSettings() {
   const canEdit = !localRoom || (localRoom.role === '房主' && (!remoteRoom || remoteRoom.status === 'lobby'))
   ;[
     byId.roomModeClassic,
-    byId.roomModeTimed,
+      byId.roomModeTimed,
+      ...byId.roomMediaButtons,
     byId.roomLengthInput,
     byId.roomMinVotes,
     byId.roomScoreMin,
     byId.roomScoreMax,
     byId.roomYearMin,
     byId.roomYearMax,
-    byId.roomRanking,
+      byId.roomRanking,
+      ...byId.roomGalgameAudienceButtons,
     ...byId.roomPresetButtons,
     ...byId.roomYearButtons,
     ...Object.values(byId.roomExcludes),
+    ...Object.values(byId.roomTagFilters),
   ].forEach((control) => {
     control.disabled = !canEdit
   })
 }
 
 function applyRoomPreset(name: PresetName) {
-  roomSettings = applyPresetSettings(name)
+  roomSettings = applyPresetSettings(name, roomSettings.mediaKind)
   setRoomControlsFromSettings(roomSettings, { forceScores: true, forceYears: true })
   syncRoomSettings({ normalizeScores: true })
+}
+
+async function changeRoomMediaKind(mediaKind: MediaKind) {
+  if (roomSettings.mediaKind === mediaKind) return
+  try {
+    await loadSubjects(mediaKind)
+    roomSettings = createDefaultSettings(mediaKind)
+    activeRoomPreset = 'standard'
+    setRoomControlsFromSettings(roomSettings, { forceScores: true, forceYears: true })
+    renderRoomSettings()
+    pushRoomSettings()
+  } catch (error) {
+    console.error(error)
+    showToast(`未找到${mediaLabels[mediaKind]}题库`)
+  }
+}
+
+function applyRoomGalgameAudience(audience: GalgameAudience) {
+  roomSettings = { ...roomSettings, galgameAudience: audience }
+  activeRoomPreset = detectPreset(roomSettings)
+  setRoomControlsFromSettings(roomSettings)
+  renderRoomSettings()
+  pushRoomSettings()
 }
 
 async function createNetworkRoom() {
@@ -1348,6 +1648,7 @@ async function createNetworkRoom() {
   sendRoomMessage({
     type: 'createRoom',
     nickname: currentNickname(),
+    mediaKind: roomSettings.mediaKind,
     mode: roomMode,
     settings: roomSettings,
     ...roomLengthPayload(),
@@ -1421,24 +1722,27 @@ function card(side: Side) {
   }
 }
 
-function fallbackText(anime: Anime) {
-  return titleOf(anime).trim().slice(0, 2) || '封面'
+function fallbackText(subject: RatedSubject) {
+  const title = titleOf(subject).trim()
+  return subject.adult ? title || '作品名' : title.slice(0, 2) || '封面'
 }
 
-function renderCard(side: Side, anime: Anime | null) {
+function renderCard(side: Side, subject: RatedSubject | null) {
   const view = card(side)
   view.root.className = 'anime-card'
   view.chip.className = 'result-chip'
   view.chip.textContent = ''
   view.poster.dataset.loading = 'false'
   view.poster.dataset.failed = 'false'
+  view.poster.dataset.titleCover = 'false'
   view.fallback.textContent = '封面加载中'
-  if (!anime) {
+  if (!subject) {
     view.root.disabled = true
     view.title.textContent = '暂无题目'
     view.meta.textContent = '请调整筛选条件'
     view.score.textContent = '-'
     view.fallback.textContent = '暂无封面'
+    view.image.hidden = true
     view.image.removeAttribute('data-anime-id')
     view.image.removeAttribute('src')
     return
@@ -1446,27 +1750,37 @@ function renderCard(side: Side, anime: Anime | null) {
   const shouldReveal = phase === 'reveal' || (side === 'left' && !firstRound)
   view.root.disabled = phase !== 'playing'
   view.poster.dataset.loading = 'true'
-  view.image.dataset.animeId = String(anime.id)
-  view.fallback.textContent = fallbackText(anime)
+  view.image.dataset.animeId = String(subject.id)
+  view.fallback.textContent = fallbackText(subject)
+  if (!subject.image) {
+    view.poster.dataset.loading = 'false'
+    view.poster.dataset.failed = 'true'
+    view.poster.dataset.titleCover = 'true'
+    view.image.hidden = true
+    view.image.removeAttribute('src')
+    view.image.alt = ''
+  } else {
+  view.image.hidden = false
   view.image.onload = () => {
-    if (view.image.dataset.animeId === String(anime.id)) view.poster.dataset.loading = 'false'
+    if (view.image.dataset.animeId === String(subject.id)) view.poster.dataset.loading = 'false'
   }
   view.image.onerror = () => {
-    if (view.image.dataset.animeId === String(anime.id)) {
+    if (view.image.dataset.animeId === String(subject.id)) {
       view.poster.dataset.loading = 'false'
       view.poster.dataset.failed = 'true'
       view.image.removeAttribute('src')
     }
   }
-  if (view.image.src !== anime.image) {
-    view.image.src = anime.image
+  if (view.image.src !== subject.image) {
+    view.image.src = subject.image
   } else if (view.image.complete && view.image.naturalWidth > 0) {
     view.poster.dataset.loading = 'false'
   }
-  view.image.alt = `${titleOf(anime)} 封面`
-  view.title.textContent = titleOf(anime)
-  view.meta.textContent = `${yearOf(anime) || '未知'} · ${anime.platform || '动画'} · ${anime.votes.toLocaleString()} votes`
-  view.score.textContent = shouldReveal ? anime.score.toFixed(1) : '?'
+  }
+  view.image.alt = `${titleOf(subject)} 封面`
+  view.title.textContent = titleOf(subject)
+  view.meta.textContent = `${yearOf(subject) || '未知'} · ${subject.platform || mediaFallback(subject.mediaKind)} · ${subject.votes.toLocaleString()} votes`
+  view.score.textContent = shouldReveal ? subject.score.toFixed(1) : '?'
   view.score.classList.toggle('hidden-score', !shouldReveal)
 
   if (phase === 'reveal') {
@@ -1495,7 +1809,11 @@ function renderStats() {
   byId.modeClassic.setAttribute('aria-pressed', mode === 'classic' ? 'true' : 'false')
   byId.modeTimed.setAttribute('aria-pressed', mode === 'timed' ? 'true' : 'false')
   byId.roundNote.textContent = '胜者进入下一轮，左侧会显示上一轮胜者的评分。可按 1 / 2 快速选择左右。'
-  byId.dataUpdated.textContent = dataUpdatedAt ? `数据更新时间 ${dataUpdatedAt}` : '数据更新时间 --'
+  const updatedAt = dataUpdatedAt.get(settings.mediaKind)
+  byId.dataUpdated.textContent = updatedAt ? `${mediaLabels[settings.mediaKind]}数据更新时间 ${updatedAt}` : '数据更新时间 --'
+  byId.mediaButtons.forEach((button) => {
+    button.setAttribute('aria-pressed', button.dataset.mediaKind === settings.mediaKind ? 'true' : 'false')
+  })
   byId.presetButtons.forEach((button) => {
     const pressed = activePreset === button.dataset.preset
     button.setAttribute('aria-pressed', pressed ? 'true' : 'false')
@@ -1532,7 +1850,7 @@ function startTimedRound() {
   if (mode !== 'timed' || phase !== 'ready') return
   phase = 'playing'
   byId.timedReadyDialog.close()
-  setPrompt('哪部动画评分更高？')
+  setPrompt(questionFor(settings.mediaKind))
   startTimer()
   render()
 }
@@ -1569,7 +1887,7 @@ function restartGame() {
       setPrompt('准备好后开始限时挑战')
       showTimedReadyDialog()
     } else {
-      setPrompt('哪部动画评分更高？')
+      setPrompt(questionFor(settings.mediaKind))
     }
   }
   render()
@@ -1605,20 +1923,20 @@ function advanceRound() {
   if (!right) return
   left = right
   seen.add(left.id)
-  const next = pickNextAnime(pool, left, seen)
+  const next = pickNextSubject(pool, left, seen)
   if (!next) {
     endGame('题库用完')
     return
   }
   seen = next.seen
-  right = next.anime
-  seen.add(next.anime.id)
+  right = next.subject
+  seen.add(next.subject.id)
   phase = 'playing'
   firstRound = false
   selectedSide = null
   winningSide = null
   isTie = false
-  setPrompt('哪部动画评分更高？')
+  setPrompt(questionFor(settings.mediaKind))
   render()
 }
 
@@ -1654,12 +1972,14 @@ function endGame(reason: string) {
 
 function syncSettings(options: { normalizeScores?: boolean } = {}) {
   settings = {
+    mediaKind: settings.mediaKind,
     minVotes: Number.parseInt(byId.minVotes.value, 10),
     scoreMin: readScore(byId.scoreMin, settings.scoreMin),
     scoreMax: readScore(byId.scoreMax, settings.scoreMax),
-    yearMin: Number.parseInt(byId.yearMin.value, 10),
-    yearMax: Number.parseInt(byId.yearMax.value, 10),
+    yearMin: readYear(byId.yearMin, settings.yearMin),
+    yearMax: readYear(byId.yearMax, settings.yearMax),
     ranking: byId.ranking.value as RankingFilter,
+    galgameAudience: settings.galgameAudience,
     excludes: {
       guochan: byId.excludes.guochan.checked,
       movies: byId.excludes.movies.checked,
@@ -1669,9 +1989,21 @@ function syncSettings(options: { normalizeScores?: boolean } = {}) {
       short: byId.excludes.short.checked,
       recap: byId.excludes.recap.checked,
     },
+    tagFilters: {
+      mangaShort: byId.tagFilters.mangaShort.checked,
+      mangaMedium: byId.tagFilters.mangaMedium.checked,
+      mangaFourPanel: byId.tagFilters.mangaFourPanel.checked,
+      mangaCompleted: byId.tagFilters.mangaCompleted.checked,
+      mangaNovelAdapted: byId.tagFilters.mangaNovelAdapted.checked,
+      lightNovelWeb: byId.tagFilters.lightNovelWeb.checked,
+      lightNovelCompleted: byId.tagFilters.lightNovelCompleted.checked,
+    },
   }
   if (settings.scoreMin > settings.scoreMax) {
     ;[settings.scoreMin, settings.scoreMax] = [settings.scoreMax, settings.scoreMin]
+  }
+  if (settings.yearMin > settings.yearMax) {
+    ;[settings.yearMin, settings.yearMax] = [settings.yearMax, settings.yearMin]
   }
   if (options.normalizeScores) {
     byId.scoreMin.value = formatScoreInput(settings.scoreMin)
@@ -1704,6 +2036,37 @@ function commitScores() {
   restartGame()
 }
 
+function commitSoloYears(options: { normalize?: boolean } = {}) {
+  const yearMin = readYear(byId.yearMin, settings.yearMin)
+  const yearMax = readYear(byId.yearMax, settings.yearMax)
+  const nextMin = Math.min(yearMin, yearMax)
+  const nextMax = Math.max(yearMin, yearMax)
+  if (options.normalize) {
+    byId.yearMin.value = String(nextMin)
+    byId.yearMax.value = String(nextMax)
+  }
+  syncSettings()
+  renderSoloYearShortcutState()
+  restartGame()
+}
+
+function handleSoloYearInput(input: HTMLInputElement) {
+  sanitizeYearInput(input)
+  activePreset = null
+  renderPresetState()
+  renderSoloYearShortcutState(null)
+  const minValue = byId.yearMin.value
+  const maxValue = byId.yearMax.value
+  if (isCompleteYear(minValue) && isCompleteYear(maxValue)) commitSoloYears()
+}
+
+function applySoloYearRange(range: YearRange) {
+  const [yearMin, yearMax] = yearRangeValues(range)
+  byId.yearMin.value = String(yearMin)
+  byId.yearMax.value = String(yearMax)
+  commitSoloYears()
+}
+
 function isTypingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false
   const control = target.closest<HTMLElement>('input, select, textarea, button, [contenteditable="true"]')
@@ -1733,17 +2096,16 @@ function handleAnswerShortcut(event: KeyboardEvent) {
 }
 
 function applyPreset(name: PresetName) {
-  const presetSettings = applyPresetSettings(name)
-  byId.minVotes.value = String(presetSettings.minVotes)
-  byId.scoreMin.value = String(presetSettings.scoreMin)
-  byId.scoreMax.value = String(presetSettings.scoreMax)
-  byId.yearMin.value = String(presetSettings.yearMin)
-  byId.yearMax.value = String(presetSettings.yearMax)
-  byId.ranking.value = presetSettings.ranking
-  ;(Object.keys(byId.excludes) as ExcludeKey[]).forEach((key) => {
-    byId.excludes[key].checked = presetSettings.excludes[key]
-  })
+  const presetSettings = applyPresetSettings(name, settings.mediaKind)
+  setSoloControlsFromSettings(presetSettings)
   syncSettings({ normalizeScores: true })
+  restartGame()
+}
+
+function applyGalgameAudience(audience: GalgameAudience) {
+  settings = { ...settings, galgameAudience: audience }
+  activePreset = detectPreset(settings)
+  setSoloControlsFromSettings(settings)
   restartGame()
 }
 
@@ -1807,12 +2169,23 @@ function bindEvents() {
     renderRoomSettings()
     pushRoomSettings()
   })
+  byId.roomMediaButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      void changeRoomMediaKind((button.dataset.roomMediaKind ?? 'anime') as MediaKind)
+    })
+  })
+  byId.roomGalgameAudienceButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      applyRoomGalgameAudience((button.dataset.roomGalgameAudience ?? 'all') as GalgameAudience)
+    })
+  })
   byId.roomLengthInput.addEventListener('change', syncRoomLength)
   byId.roomLengthInput.addEventListener('input', syncRoomLength)
   ;[
     byId.roomMinVotes,
     byId.roomRanking,
     ...Object.values(byId.roomExcludes),
+    ...Object.values(byId.roomTagFilters),
   ].forEach((control) => {
     control.addEventListener('change', () => syncRoomSettings())
     control.addEventListener('input', () => syncRoomSettings())
@@ -1834,17 +2207,16 @@ function bindEvents() {
     })
   })
   byId.roomYearButtons.forEach((button) => {
-    button.addEventListener('click', () => applyRoomYearRange((button.dataset.roomYearRange ?? 'all') as RoomYearRange))
+    button.addEventListener('click', () => applyRoomYearRange((button.dataset.roomYearRange ?? 'all') as YearRange))
   })
   byId.roomPresetButtons.forEach((button) => {
     button.addEventListener('click', () => applyRoomPreset((button.dataset.roomPreset ?? 'standard') as PresetName))
   })
   ;[
     byId.minVotes,
-    byId.yearMin,
-    byId.yearMax,
     byId.ranking,
     ...Object.values(byId.excludes),
+    ...Object.values(byId.tagFilters),
   ].forEach((control) => {
     control.addEventListener('change', () => {
       syncSettings()
@@ -1863,8 +2235,29 @@ function bindEvents() {
       if (event.key === 'Enter') control.blur()
     })
   })
+  ;[byId.yearMin, byId.yearMax].forEach((control) => {
+    control.addEventListener('input', () => handleSoloYearInput(control))
+    control.addEventListener('change', () => commitSoloYears({ normalize: true }))
+    control.addEventListener('blur', () => commitSoloYears({ normalize: true }))
+    control.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') control.blur()
+    })
+  })
+  byId.yearButtons.forEach((button) => {
+    button.addEventListener('click', () => applySoloYearRange((button.dataset.yearRange ?? 'all') as YearRange))
+  })
   byId.presetButtons.forEach((button) => {
     button.addEventListener('click', () => applyPreset((button.dataset.preset ?? 'standard') as PresetName))
+  })
+  byId.mediaButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      void useSoloMediaKind((button.dataset.mediaKind ?? 'anime') as MediaKind)
+    })
+  })
+  byId.galgameAudienceButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      applyGalgameAudience((button.dataset.galgameAudience ?? 'all') as GalgameAudience)
+    })
   })
   window.addEventListener('keydown', handleAnswerShortcut)
 }
@@ -1872,21 +2265,14 @@ function bindEvents() {
 async function boot() {
   bindEvents()
   try {
-    const [response, metaResponse] = await Promise.all([fetch('/anime-seed.json'), fetch('/anime-seed-meta.json')])
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    allAnime = (await response.json()) as Anime[]
-    if (metaResponse.ok) {
-      const meta = (await metaResponse.json()) as AnimeSeedMeta
-      dataUpdatedAt = formatUpdatedAt(meta.generatedAt)
-    } else {
-      dataUpdatedAt = formatUpdatedAt(response.headers.get('last-modified') ?? '')
-    }
+    subjects = await loadSubjects(settings.mediaKind)
+    setSoloControlsFromSettings(settings)
     syncSettings()
     syncRoomSettings()
     restartGame()
   } catch (error) {
     console.error(error)
-    setPrompt('未找到题库，请先运行 npm run data:seed。', 'bad')
+    setPrompt(`未找到${mediaLabels[settings.mediaKind]}题库，请先运行 npm run data:seed。`, 'bad')
     phase = 'ended'
     render()
   }

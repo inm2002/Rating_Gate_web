@@ -339,10 +339,21 @@ h1 {
   letter-spacing: 0.08em;
 }
 
+.room-audience-switch,
+.room-media-switch,
 .room-mode-switch,
 .room-preset-row {
   display: grid;
   gap: 6px;
+}
+
+.room-audience-switch,
+.room-media-switch {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.room-media-switch {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .room-mode-switch {
@@ -353,6 +364,8 @@ h1 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.room-audience-switch button,
+.room-media-switch button,
 .room-mode-switch button,
 .room-preset-row button {
   min-height: 34px;
@@ -365,6 +378,8 @@ h1 {
   font-weight: 750;
 }
 
+.room-audience-switch button[aria-pressed='true'],
+.room-media-switch button[aria-pressed='true'],
 .room-mode-switch button[aria-pressed='true'],
 .room-preset-row button[aria-pressed='true'] {
   border-color: var(--ink);
@@ -742,8 +757,12 @@ h1 {
 .primary-button:focus-visible,
 .mode-switch button:focus-visible,
 .view-switch button:focus-visible,
+.room-audience-switch button:focus-visible,
+.room-media-switch button:focus-visible,
 .room-mode-switch button:focus-visible,
 .room-preset-row button:focus-visible,
+.audience-switch button:focus-visible,
+.media-switch button:focus-visible,
 .preset-row button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
@@ -791,6 +810,14 @@ h1 {
   font-weight: 850;
   letter-spacing: 0;
   text-align: center;
+}
+
+.poster-wrap[data-title-cover='true'] .poster-fallback {
+  padding: clamp(24px, 5vw, 54px);
+  color: rgba(27, 31, 42, 0.72);
+  font-size: clamp(1.08rem, 2vw, 1.8rem);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .poster-wrap::after {
@@ -958,12 +985,21 @@ h1 {
   gap: 15px;
 }
 
+.audience-switch,
 .preset-row {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
 }
 
+.media-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.audience-switch button,
+.media-switch button,
 .preset-row button {
   min-height: 34px;
   border: 1px solid var(--line);
@@ -975,11 +1011,15 @@ h1 {
   font-weight: 750;
 }
 
+.audience-switch button:hover,
+.media-switch button:hover,
 .preset-row button:hover {
   border-color: var(--line-strong);
   color: var(--ink);
 }
 
+.audience-switch button[aria-pressed='true'],
+.media-switch button[aria-pressed='true'],
 .preset-row button[aria-pressed='true'] {
   border-color: var(--ink);
   background: var(--ink);
@@ -995,7 +1035,8 @@ h1 {
 }
 
 .control-field > span,
-.exclude-set legend {
+.exclude-set legend,
+.galgame-audience-set legend {
   color: var(--ink);
   font-size: 0.84rem;
   font-weight: 780;
@@ -1077,7 +1118,17 @@ h1 {
   padding: 0;
 }
 
-.exclude-set legend {
+.galgame-audience-set {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.exclude-set legend,
+.galgame-audience-set legend {
   margin-bottom: 10px;
   padding: 0;
 }

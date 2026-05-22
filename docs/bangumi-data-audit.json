@@ -1,0 +1,1618 @@
+{
+  "generatedAt": "2026-05-22T05:22:14.766Z",
+  "note": "题库审计基于 Bangumi API 抽样候选池；生成脚本复用同一过滤规则。",
+  "media": {
+    "anime": {
+      "label": "动画",
+      "minVotes": 100,
+      "filters": "Anime type + nsfw=false",
+      "count": 1337,
+      "distinctScores": 61,
+      "ranked": 1337,
+      "rankRange": [
+        1,
+        10077
+      ],
+      "voteRange": [
+        100,
+        39435
+      ],
+      "sample": [
+        {
+          "id": 326,
+          "title": "攻壳机动队 S.A.C. 2nd GIG",
+          "score": 9.2,
+          "votes": 9814,
+          "rank": 1,
+          "tags": [
+            "科幻",
+            "TV",
+            "日本",
+            "漫画改",
+            "战斗",
+            "菅野洋子"
+          ]
+        },
+        {
+          "id": 876,
+          "title": "CLANNAD 〜AFTER STORY〜",
+          "score": 9.2,
+          "votes": 30817,
+          "rank": 2,
+          "tags": [
+            "TV",
+            "恋爱",
+            "日本",
+            "游戏改",
+            "日常",
+            "Clannad"
+          ]
+        },
+        {
+          "id": 25961,
+          "title": "猫和老鼠",
+          "score": 9.1,
+          "votes": 13849,
+          "rank": 3,
+          "tags": [
+            "TV",
+            "原创",
+            "美国",
+            "欧美",
+            "童年",
+            "搞笑"
+          ]
+        },
+        {
+          "id": 253,
+          "title": "星际牛仔",
+          "score": 9.1,
+          "votes": 19131,
+          "rank": 4,
+          "tags": [
+            "科幻",
+            "TV",
+            "日本",
+            "原创",
+            "渡边信一郎",
+            "菅野洋子"
+          ]
+        },
+        {
+          "id": 324,
+          "title": "攻壳机动队 STAND ALONE COMPLEX",
+          "score": 9.1,
+          "votes": 11200,
+          "rank": 5,
+          "tags": [
+            "科幻",
+            "TV",
+            "日本",
+            "漫画改",
+            "战斗",
+            "攻壳机动队"
+          ]
+        },
+        {
+          "id": 1728,
+          "title": "浪客剑心 追忆篇",
+          "score": 8.9,
+          "votes": 9415,
+          "rank": 6,
+          "tags": [
+            "日本",
+            "OVA",
+            "漫画改",
+            "战斗",
+            "历史",
+            "剑心"
+          ]
+        },
+        {
+          "id": 6049,
+          "title": "新世纪福音战士剧场版 Air/真心为你",
+          "score": 8.9,
+          "votes": 21402,
+          "rank": 7,
+          "tags": [
+            "剧场版",
+            "原创",
+            "日本",
+            "机战",
+            "科幻",
+            "EVA"
+          ]
+        },
+        {
+          "id": 10380,
+          "title": "命运石之门",
+          "score": 8.8,
+          "votes": 39317,
+          "rank": 8,
+          "tags": [
+            "科幻",
+            "悬疑",
+            "TV",
+            "日本",
+            "游戏改",
+            "中二病"
+          ]
+        },
+        {
+          "id": 237,
+          "title": "攻壳机动队",
+          "score": 8.8,
+          "votes": 12514,
+          "rank": 9,
+          "tags": [
+            "剧场版",
+            "日本",
+            "漫画改",
+            "科幻",
+            "押井守",
+            "攻壳机动队"
+          ]
+        },
+        {
+          "id": 211567,
+          "title": "3月的狮子 第二季",
+          "score": 8.8,
+          "votes": 10390,
+          "rank": 10,
+          "tags": [
+            "TV",
+            "日本",
+            "漫画改",
+            "日常",
+            "新房昭之",
+            "治愈"
+          ]
+        },
+        {
+          "id": 1428,
+          "title": "钢之炼金术师 FULLMETAL ALCHEMIST",
+          "score": 8.8,
+          "votes": 24371,
+          "rank": 11,
+          "tags": [
+            "TV",
+            "日本",
+            "奇幻",
+            "漫画改",
+            "战斗",
+            "少年向"
+          ]
+        },
+        {
+          "id": 321,
+          "title": "机动警察剧场版2 和平保卫战",
+          "score": 8.8,
+          "votes": 3946,
+          "rank": 12,
+          "tags": [
+            "科幻",
+            "剧场版",
+            "日本",
+            "原创",
+            "押井守",
+            "机动警察"
+          ]
+        }
+      ],
+      "pages": [
+        {
+          "label": "anime rank 1-500",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 20
+        },
+        {
+          "label": "anime rank 1-500",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 40
+        },
+        {
+          "label": "anime rank 1-500",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 60
+        },
+        {
+          "label": "anime rank 1-500",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 80
+        },
+        {
+          "label": "anime rank 501-1000",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 19,
+          "uniqueAccepted": 99
+        },
+        {
+          "label": "anime rank 501-1000",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 19,
+          "uniqueAccepted": 118
+        },
+        {
+          "label": "anime rank 501-1000",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 138
+        },
+        {
+          "label": "anime rank 501-1000",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 18,
+          "uniqueAccepted": 156
+        },
+        {
+          "label": "anime rank 1001-1500",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 19,
+          "uniqueAccepted": 175
+        },
+        {
+          "label": "anime rank 1001-1500",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 195
+        },
+        {
+          "label": "anime rank 1001-1500",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 19,
+          "uniqueAccepted": 214
+        },
+        {
+          "label": "anime rank 1001-1500",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 18,
+          "uniqueAccepted": 232
+        },
+        {
+          "label": "anime rank 1501-2000",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 18,
+          "uniqueAccepted": 250
+        },
+        {
+          "label": "anime rank 1501-2000",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 270
+        },
+        {
+          "label": "anime rank 1501-2000",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 18,
+          "uniqueAccepted": 288
+        },
+        {
+          "label": "anime rank 1501-2000",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 17,
+          "uniqueAccepted": 305
+        },
+        {
+          "label": "anime rank 2001-2500",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 17,
+          "uniqueAccepted": 322
+        },
+        {
+          "label": "anime rank 2001-2500",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 17,
+          "uniqueAccepted": 339
+        },
+        {
+          "label": "anime rank 2001-2500",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 359
+        },
+        {
+          "label": "anime rank 2001-2500",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 14,
+          "uniqueAccepted": 373
+        },
+        {
+          "label": "anime rank 2501-3000",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 17,
+          "uniqueAccepted": 390
+        },
+        {
+          "label": "anime rank 2501-3000",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 15,
+          "uniqueAccepted": 405
+        },
+        {
+          "label": "anime rank 2501-3000",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 17,
+          "uniqueAccepted": 422
+        },
+        {
+          "label": "anime rank 2501-3000",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 14,
+          "uniqueAccepted": 436
+        },
+        {
+          "label": "anime rank 3001-3500",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 18,
+          "uniqueAccepted": 454
+        },
+        {
+          "label": "anime rank 3001-3500",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 15,
+          "uniqueAccepted": 469
+        },
+        {
+          "label": "anime rank 3001-3500",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 17,
+          "uniqueAccepted": 486
+        },
+        {
+          "label": "anime rank 3001-3500",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 18,
+          "uniqueAccepted": 504
+        },
+        {
+          "label": "anime rank 3501-4000",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 15,
+          "uniqueAccepted": 519
+        },
+        {
+          "label": "anime rank 3501-4000",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 17,
+          "uniqueAccepted": 536
+        },
+        {
+          "label": "anime rank 3501-4000",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 18,
+          "uniqueAccepted": 554
+        },
+        {
+          "label": "anime rank 3501-4000",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 16,
+          "uniqueAccepted": 570
+        },
+        {
+          "label": "anime rank 4001-4500",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 16,
+          "uniqueAccepted": 586
+        },
+        {
+          "label": "anime rank 4001-4500",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 15,
+          "uniqueAccepted": 601
+        },
+        {
+          "label": "anime rank 4001-4500",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 16,
+          "uniqueAccepted": 617
+        },
+        {
+          "label": "anime rank 4001-4500",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 16,
+          "uniqueAccepted": 633
+        },
+        {
+          "label": "anime rank 4501-5000",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 16,
+          "uniqueAccepted": 649
+        },
+        {
+          "label": "anime rank 4501-5000",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 18,
+          "uniqueAccepted": 667
+        },
+        {
+          "label": "anime rank 4501-5000",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 16,
+          "uniqueAccepted": 683
+        },
+        {
+          "label": "anime rank 4501-5000",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 18,
+          "uniqueAccepted": 701
+        },
+        {
+          "label": "anime rank 5001-5500",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 13,
+          "uniqueAccepted": 714
+        },
+        {
+          "label": "anime rank 5001-5500",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 15,
+          "uniqueAccepted": 729
+        },
+        {
+          "label": "anime rank 5001-5500",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 17,
+          "uniqueAccepted": 746
+        },
+        {
+          "label": "anime rank 5001-5500",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 19,
+          "uniqueAccepted": 765
+        },
+        {
+          "label": "anime rank 5501-6000",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 12,
+          "uniqueAccepted": 777
+        },
+        {
+          "label": "anime rank 5501-6000",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 15,
+          "uniqueAccepted": 792
+        },
+        {
+          "label": "anime rank 5501-6000",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 14,
+          "uniqueAccepted": 806
+        },
+        {
+          "label": "anime rank 5501-6000",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 16,
+          "uniqueAccepted": 822
+        },
+        {
+          "label": "anime rank 6001-6500",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 16,
+          "uniqueAccepted": 838
+        },
+        {
+          "label": "anime rank 6001-6500",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 15,
+          "uniqueAccepted": 853
+        },
+        {
+          "label": "anime rank 6001-6500",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 10,
+          "uniqueAccepted": 863
+        },
+        {
+          "label": "anime rank 6001-6500",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 16,
+          "uniqueAccepted": 879
+        },
+        {
+          "label": "anime rank 6501-7000",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 18,
+          "uniqueAccepted": 897
+        },
+        {
+          "label": "anime rank 6501-7000",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 18,
+          "uniqueAccepted": 915
+        },
+        {
+          "label": "anime rank 6501-7000",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 14,
+          "uniqueAccepted": 929
+        },
+        {
+          "label": "anime rank 6501-7000",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 13,
+          "uniqueAccepted": 942
+        },
+        {
+          "label": "anime rank 7001-7500",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 13,
+          "uniqueAccepted": 955
+        },
+        {
+          "label": "anime rank 7001-7500",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 17,
+          "uniqueAccepted": 972
+        },
+        {
+          "label": "anime rank 7001-7500",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 15,
+          "uniqueAccepted": 987
+        },
+        {
+          "label": "anime rank 7001-7500",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 19,
+          "uniqueAccepted": 1006
+        },
+        {
+          "label": "anime rank 7501-8000",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 16,
+          "uniqueAccepted": 1022
+        },
+        {
+          "label": "anime rank 7501-8000",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 19,
+          "uniqueAccepted": 1041
+        },
+        {
+          "label": "anime rank 7501-8000",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 16,
+          "uniqueAccepted": 1057
+        },
+        {
+          "label": "anime rank 7501-8000",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 17,
+          "uniqueAccepted": 1074
+        },
+        {
+          "label": "anime rank 8001-8500",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 14,
+          "uniqueAccepted": 1088
+        },
+        {
+          "label": "anime rank 8001-8500",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 18,
+          "uniqueAccepted": 1106
+        },
+        {
+          "label": "anime rank 8001-8500",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 17,
+          "uniqueAccepted": 1123
+        },
+        {
+          "label": "anime rank 8001-8500",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 14,
+          "uniqueAccepted": 1137
+        },
+        {
+          "label": "anime rank 8501-9000",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 14,
+          "uniqueAccepted": 1151
+        },
+        {
+          "label": "anime rank 8501-9000",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 19,
+          "uniqueAccepted": 1170
+        },
+        {
+          "label": "anime rank 8501-9000",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 19,
+          "uniqueAccepted": 1189
+        },
+        {
+          "label": "anime rank 8501-9000",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 15,
+          "uniqueAccepted": 1204
+        },
+        {
+          "label": "anime heat",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 1214
+        },
+        {
+          "label": "anime heat",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 1226
+        },
+        {
+          "label": "anime heat",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 1241
+        },
+        {
+          "label": "anime heat",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 1258
+        },
+        {
+          "label": "anime score",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 0,
+          "uniqueAccepted": 1258
+        },
+        {
+          "label": "anime score",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 0,
+          "uniqueAccepted": 1258
+        },
+        {
+          "label": "anime score",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 0,
+          "uniqueAccepted": 1258
+        },
+        {
+          "label": "anime score",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 0,
+          "uniqueAccepted": 1258
+        },
+        {
+          "label": "anime low heat",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 1277
+        },
+        {
+          "label": "anime low heat",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 1297
+        },
+        {
+          "label": "anime low heat",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 1317
+        },
+        {
+          "label": "anime low heat",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 1337
+        },
+        {
+          "label": "anime low rank",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 0,
+          "uniqueAccepted": 1337
+        },
+        {
+          "label": "anime low rank",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 0,
+          "uniqueAccepted": 1337
+        },
+        {
+          "label": "anime low rank",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 0,
+          "uniqueAccepted": 1337
+        },
+        {
+          "label": "anime low rank",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 0,
+          "uniqueAccepted": 1337
+        },
+        {
+          "label": "anime recent",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 1337
+        },
+        {
+          "label": "anime recent",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 1337
+        },
+        {
+          "label": "anime recent",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 1337
+        },
+        {
+          "label": "anime recent",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 1337
+        }
+      ]
+    },
+    "manga": {
+      "label": "漫画",
+      "minVotes": 50,
+      "filters": "Comic category + series",
+      "count": 79,
+      "distinctScores": 11,
+      "ranked": 79,
+      "rankRange": [
+        1,
+        224
+      ],
+      "voteRange": [
+        89,
+        3059
+      ],
+      "sample": [
+        {
+          "id": 18462,
+          "title": "灌篮高手 完全版",
+          "score": 9.4,
+          "votes": 1862,
+          "rank": 1,
+          "tags": [
+            "井上雄彦",
+            "篮球",
+            "热血",
+            "漫画",
+            "神作",
+            "体育"
+          ]
+        },
+        {
+          "id": 9640,
+          "title": "剑风传奇",
+          "score": 9.3,
+          "votes": 3019,
+          "rank": 2,
+          "tags": [
+            "日本",
+            "漫画",
+            "原创",
+            "系列",
+            "连载中",
+            "三浦健太郎"
+          ]
+        },
+        {
+          "id": 36752,
+          "title": "灌篮高手",
+          "score": 9.3,
+          "votes": 1051,
+          "rank": 3,
+          "tags": [
+            "井上雄彦",
+            "漫画",
+            "热血",
+            "灌篮高手",
+            "篮球",
+            "青春"
+          ]
+        },
+        {
+          "id": 25896,
+          "title": "火之鸟",
+          "score": 9.3,
+          "votes": 1320,
+          "rank": 4,
+          "tags": [
+            "日本",
+            "漫画",
+            "原创",
+            "系列",
+            "已完结",
+            "纸质书"
+          ]
+        },
+        {
+          "id": 27684,
+          "title": "哆啦A梦",
+          "score": 9.3,
+          "votes": 1546,
+          "rank": 5,
+          "tags": [
+            "藤子・F・不二雄",
+            "童年",
+            "漫画",
+            "哆啦A梦",
+            "科幻",
+            "小学館"
+          ]
+        },
+        {
+          "id": 44996,
+          "title": "JoJo的奇妙冒险 第七部 飙马野郎",
+          "score": 9.1,
+          "votes": 3059,
+          "rank": 6,
+          "tags": [
+            "日本",
+            "漫画",
+            "战斗",
+            "少年",
+            "奇幻",
+            "冒险"
+          ]
+        },
+        {
+          "id": 25402,
+          "title": "风之谷",
+          "score": 9,
+          "votes": 771,
+          "rank": 12,
+          "tags": [
+            "宫崎骏",
+            "漫画",
+            "科幻",
+            "風の谷のナウシカ",
+            "自然主义",
+            "风之谷"
+          ]
+        },
+        {
+          "id": 172526,
+          "title": "水星领航员 完全版",
+          "score": 9.1,
+          "votes": 237,
+          "rank": 16,
+          "tags": [
+            "漫画",
+            "治愈",
+            "ARIA",
+            "科幻",
+            "天野梢",
+            "日常"
+          ]
+        },
+        {
+          "id": 27466,
+          "title": "龙珠",
+          "score": 8.9,
+          "votes": 1726,
+          "rank": 19,
+          "tags": [
+            "日本",
+            "漫画",
+            "原创",
+            "系列",
+            "已完结",
+            "鸟山明"
+          ]
+        },
+        {
+          "id": 10787,
+          "title": "女仆咖啡厅",
+          "score": 8.9,
+          "votes": 1576,
+          "rank": 20,
+          "tags": [
+            "日本",
+            "推理",
+            "漫画",
+            "校园",
+            "搞笑",
+            "日常"
+          ]
+        },
+        {
+          "id": 1626,
+          "title": "守望者",
+          "score": 8.9,
+          "votes": 548,
+          "rank": 21,
+          "tags": [
+            "漫画",
+            "DC",
+            "守望者",
+            "欧美漫画",
+            "冷战",
+            "Alan_Moore"
+          ]
+        },
+        {
+          "id": 32435,
+          "title": "浪客行",
+          "score": 8.9,
+          "votes": 1180,
+          "rank": 24,
+          "tags": [
+            "井上雄彦",
+            "漫画",
+            "宫本武藏",
+            "画功",
+            "武士",
+            "青年漫画"
+          ]
+        }
+      ],
+      "pages": [
+        {
+          "label": "manga rank",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 20
+        },
+        {
+          "label": "manga rank",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 40
+        },
+        {
+          "label": "manga rank",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 60
+        },
+        {
+          "label": "manga rank",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 19,
+          "uniqueAccepted": 79
+        }
+      ]
+    },
+    "lightNovel": {
+      "label": "轻小说",
+      "minVotes": 50,
+      "filters": "Novel category + series + light novel tag signal",
+      "count": 59,
+      "distinctScores": 10,
+      "ranked": 59,
+      "rankRange": [
+        25,
+        740
+      ],
+      "voteRange": [
+        51,
+        3423
+      ],
+      "sample": [
+        {
+          "id": 12818,
+          "title": "十二国记",
+          "score": 8.9,
+          "votes": 454,
+          "rank": 25,
+          "tags": [
+            "日本",
+            "小说",
+            "原创",
+            "系列",
+            "纸质书",
+            "小野不由美"
+          ]
+        },
+        {
+          "id": 81467,
+          "title": "安达与岛村",
+          "score": 8.7,
+          "votes": 1621,
+          "rank": 40,
+          "tags": [
+            "日本",
+            "小说",
+            "百合",
+            "恋爱",
+            "日常",
+            "GL"
+          ]
+        },
+        {
+          "id": 2815,
+          "title": "空之境界",
+          "score": 8.7,
+          "votes": 2106,
+          "rank": 51,
+          "tags": [
+            "Type-Moon",
+            "奈须蘑菇",
+            "空之境界",
+            "轻小说",
+            "两仪式",
+            "奈須きのこ"
+          ]
+        },
+        {
+          "id": 62419,
+          "title": "空之境界",
+          "score": 8.6,
+          "votes": 573,
+          "rank": 64,
+          "tags": [
+            "奈須きのこ",
+            "轻小说",
+            "Type-Moon",
+            "空の境界",
+            "小说",
+            "両儀式"
+          ]
+        },
+        {
+          "id": 11236,
+          "title": "人类衰退之后",
+          "score": 8.6,
+          "votes": 704,
+          "rank": 65,
+          "tags": [
+            "田中ロミオ",
+            "轻小说",
+            "治愈",
+            "内涵",
+            "人類衰退之後",
+            "田中罗密欧"
+          ]
+        },
+        {
+          "id": 1831,
+          "title": "全金属狂潮",
+          "score": 8.6,
+          "votes": 690,
+          "rank": 69,
+          "tags": [
+            "轻小说",
+            "贺东招二",
+            "全金属狂潮",
+            "军事狂",
+            "相良宗介",
+            "军事"
+          ]
+        },
+        {
+          "id": 3671,
+          "title": "永生之酒",
+          "score": 8.6,
+          "votes": 498,
+          "rank": 79,
+          "tags": [
+            "日本",
+            "小说",
+            "成田良悟",
+            "永生之酒",
+            "轻小说",
+            "Baccano!"
+          ]
+        },
+        {
+          "id": 499,
+          "title": "文学少女",
+          "score": 8.5,
+          "votes": 3423,
+          "rank": 83,
+          "tags": [
+            "日本",
+            "小说",
+            "系列",
+            "轻小说",
+            "文学少女",
+            "野村美月"
+          ]
+        },
+        {
+          "id": 14477,
+          "title": "重启咲良田",
+          "score": 8.6,
+          "votes": 375,
+          "rank": 92,
+          "tags": [
+            "轻小说",
+            "河野裕",
+            "科幻",
+            "世界系",
+            "小说",
+            "2009"
+          ]
+        },
+        {
+          "id": 14409,
+          "title": "不吉波普系列",
+          "score": 8.7,
+          "votes": 187,
+          "rank": 94,
+          "tags": [
+            "轻小说",
+            "上远野浩平",
+            "不吉波普系列",
+            "世界系",
+            "奇幻",
+            "悬疑"
+          ]
+        },
+        {
+          "id": 223229,
+          "title": "妹妹人生",
+          "score": 8.5,
+          "votes": 2614,
+          "rank": 96,
+          "tags": [
+            "轻小说",
+            "入间人间",
+            "兄妹",
+            "纯爱",
+            "妹控",
+            "意义与价值"
+          ]
+        },
+        {
+          "id": 2265,
+          "title": "仰望半月的夜空",
+          "score": 8.5,
+          "votes": 1124,
+          "rank": 98,
+          "tags": [
+            "日本",
+            "小说",
+            "原创",
+            "轻小说",
+            "半分の月がのぼる空",
+            "桥本纺"
+          ]
+        }
+      ],
+      "pages": [
+        {
+          "label": "light novel rank",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 13,
+          "uniqueAccepted": 13
+        },
+        {
+          "label": "light novel rank",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 17,
+          "uniqueAccepted": 30
+        },
+        {
+          "label": "light novel rank",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 15,
+          "uniqueAccepted": 45
+        },
+        {
+          "label": "light novel rank",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 14,
+          "uniqueAccepted": 59
+        }
+      ]
+    },
+    "galgame": {
+      "label": "Galgame",
+      "minVotes": 50,
+      "filters": "Game type + Galgame meta tag + local adult signal; adult entries use title covers",
+      "count": 152,
+      "distinctScores": 44,
+      "ranked": 152,
+      "rankRange": [
+        0,
+        10346
+      ],
+      "voteRange": [
+        51,
+        9503
+      ],
+      "sample": [
+        {
+          "id": 1126,
+          "title": "时空轮回",
+          "score": 9.1,
+          "votes": 9503,
+          "rank": 5,
+          "tags": [
+            "PSP",
+            "AVG",
+            "Galgame",
+            "PS2",
+            "PC",
+            "游戏"
+          ]
+        },
+        {
+          "id": 3154,
+          "title": "命运石之门",
+          "score": 8.9,
+          "votes": 8232,
+          "rank": 11,
+          "tags": [
+            "PS3",
+            "PSP",
+            "Galgame",
+            "PC",
+            "Xbox360",
+            "游戏"
+          ]
+        },
+        {
+          "id": 13,
+          "title": "CLANNAD",
+          "score": 8.9,
+          "votes": 6308,
+          "rank": 12,
+          "tags": [
+            "PS3",
+            "PSP",
+            "Galgame",
+            "PS2",
+            "PC",
+            "Xbox360"
+          ]
+        },
+        {
+          "id": 1127,
+          "title": "Remember11：无限轮回的时光",
+          "score": 8.8,
+          "votes": 4401,
+          "rank": 14,
+          "tags": [
+            "AVG",
+            "Android",
+            "Galgame",
+            "PC",
+            "PS2",
+            "PSP"
+          ]
+        },
+        {
+          "id": 4828,
+          "title": "Muv-Luv Alternative",
+          "score": 8.8,
+          "votes": 3904,
+          "rank": 16,
+          "tags": [
+            "PS3",
+            "Galgame",
+            "PC",
+            "Xbox360",
+            "游戏",
+            "ADV"
+          ]
+        },
+        {
+          "id": 328585,
+          "title": "海猫鸣泣之时咲～猫箱和梦想的交响曲～",
+          "score": 8.8,
+          "votes": 1244,
+          "rank": 22,
+          "tags": [
+            "AVG",
+            "Galgame",
+            "游戏",
+            "NS",
+            "PS4",
+            "竜騎士07"
+          ]
+        },
+        {
+          "id": 56363,
+          "title": "海猫鸣泣之时散～真实与幻想的夜想曲～",
+          "score": 8.7,
+          "votes": 1172,
+          "rank": 33,
+          "tags": [
+            "Galgame",
+            "游戏",
+            "竜騎士07",
+            "悬疑",
+            "推理",
+            "幻想剧"
+          ]
+        },
+        {
+          "id": 11028,
+          "title": "海猫鸣泣之时~魔女与推理的轮舞曲~",
+          "score": 8.7,
+          "votes": 1657,
+          "rank": 43,
+          "tags": [
+            "AVG",
+            "Galgame",
+            "游戏",
+            "龙骑士07",
+            "悬疑",
+            "推理"
+          ]
+        },
+        {
+          "id": 5418,
+          "title": "魔法使之夜",
+          "score": 8.6,
+          "votes": 6855,
+          "rank": 51,
+          "tags": [
+            "Galgame",
+            "PC",
+            "游戏",
+            "NS",
+            "PS4",
+            "TypeMoon"
+          ]
+        },
+        {
+          "id": 109118,
+          "title": "海猫鸣泣之时散",
+          "score": 8.6,
+          "votes": 1419,
+          "rank": 53,
+          "tags": [
+            "Galgame",
+            "同人",
+            "PC",
+            "游戏",
+            "全年龄",
+            "VN"
+          ]
+        },
+        {
+          "id": 4022,
+          "title": "Rewrite",
+          "score": 8.6,
+          "votes": 5123,
+          "rank": 61,
+          "tags": [
+            "AVG",
+            "PC",
+            "PSP",
+            "galgame",
+            "游戏",
+            "key"
+          ]
+        },
+        {
+          "id": 1143,
+          "title": "交响乐之雨",
+          "score": 8.5,
+          "votes": 2714,
+          "rank": 82,
+          "tags": [
+            "Windows",
+            "Galgame",
+            "游戏",
+            "MUG",
+            "ADV",
+            "冈崎律子"
+          ]
+        }
+      ],
+      "pages": [
+        {
+          "label": "galgame rank",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 11,
+          "uniqueAccepted": 11
+        },
+        {
+          "label": "galgame rank",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 12,
+          "uniqueAccepted": 23
+        },
+        {
+          "label": "galgame rank",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 8,
+          "uniqueAccepted": 31
+        },
+        {
+          "label": "galgame rank",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 4,
+          "uniqueAccepted": 35
+        },
+        {
+          "label": "galgame heat",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 55
+        },
+        {
+          "label": "galgame heat",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 75
+        },
+        {
+          "label": "galgame heat",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 93
+        },
+        {
+          "label": "galgame heat",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 113
+        },
+        {
+          "label": "galgame score",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 7,
+          "uniqueAccepted": 113
+        },
+        {
+          "label": "galgame score",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 20,
+          "uniqueAccepted": 115
+        },
+        {
+          "label": "galgame score",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 19,
+          "uniqueAccepted": 121
+        },
+        {
+          "label": "galgame score",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 17,
+          "uniqueAccepted": 129
+        },
+        {
+          "label": "galgame low heat",
+          "page": 1,
+          "fetched": 20,
+          "accepted": 17,
+          "uniqueAccepted": 146
+        },
+        {
+          "label": "galgame low heat",
+          "page": 2,
+          "fetched": 20,
+          "accepted": 6,
+          "uniqueAccepted": 152
+        },
+        {
+          "label": "galgame low heat",
+          "page": 3,
+          "fetched": 20,
+          "accepted": 0,
+          "uniqueAccepted": 152
+        },
+        {
+          "label": "galgame low heat",
+          "page": 4,
+          "fetched": 20,
+          "accepted": 0,
+          "uniqueAccepted": 152
+        }
+      ]
+    }
+  }
+}
