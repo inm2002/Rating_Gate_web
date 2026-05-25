@@ -33,6 +33,18 @@ type AppView = 'solo' | 'multiplayer'
 type Phase = 'loading' | 'ready' | 'playing' | 'reveal' | 'ended'
 type YearRange = 'all' | 'before2010' | 'decade2010' | 'after2020'
 
+interface AnswerReview {
+  leftTitle: string
+  rightTitle: string
+  leftScore: number
+  rightScore: number
+  selectedTitle: string
+  winningTitle: string
+  correct: boolean
+  diff: number
+  round: number
+}
+
 interface SeedMeta {
   generatedAt: string
   source: string
@@ -147,6 +159,8 @@ let timerId = 0
 let revealId = 0
 let stats: Stats = { total: 0, correct: 0, streak: 0, bestStreak: 0 }
 let diffBuckets = [0, 0, 0, 0]
+let answerReviews: AnswerReview[] = []
+let shareImageDataUrl = ''
 let activePreset: PresetName | null = 'standard'
 let activeRoomPreset: PresetName | null = 'standard'
 let settings: Settings = createDefaultSettings()
@@ -604,15 +618,62 @@ app.innerHTML = `
     <div class="result-box">
       <p class="result-kicker" id="result-kicker">挑战结束</p>
       <h2 id="result-title">游戏结束</h2>
-      <div class="result-grid">
-        <span>答对</span><strong id="result-correct">0</strong>
-        <span>已答</span><strong id="result-total">0</strong>
-        <span>最高连击</span><strong id="result-streak">0</strong>
-        <span>正确率</span><strong id="result-accuracy">0%</strong>
+      <div class="result-stats">
+        <article><span>答对</span><strong id="result-correct">0</strong></article>
+        <article><span>已答</span><strong id="result-total">0</strong></article>
+        <article><span>最高连击</span><strong id="result-streak">0</strong></article>
+        <article><span>正确率</span><strong id="result-accuracy">0%</strong></article>
       </div>
-      <div class="diff-bars" id="diff-bars"></div>
+      <section class="review-panel" aria-label="本局复盘">
+        <div class="panel-title compact-title">
+          <h3>本局复盘</h3>
+          <span id="review-summary">--</span>
+        </div>
+        <div class="review-layout">
+          <div class="review-visual">
+            <div class="accuracy-ring" id="accuracy-ring">
+              <div>
+                <span>正确率</span>
+                <strong id="accuracy-ring-value">0%</strong>
+              </div>
+            </div>
+            <div class="diff-block">
+              <div class="mini-title">
+                <span>分差分布</span>
+                <b>题目难度感</b>
+              </div>
+              <div class="diff-bars" id="diff-bars"></div>
+            </div>
+          </div>
+          <div class="review-grid">
+            <article>
+              <span>最险题</span>
+              <strong id="review-hardest">--</strong>
+              <small id="review-hardest-detail">--</small>
+            </article>
+            <article>
+              <span>最大误判</span>
+              <strong id="review-biggest-miss">--</strong>
+              <small id="review-biggest-miss-detail">--</small>
+            </article>
+            <article>
+              <span>平均分差</span>
+              <strong id="review-average-diff">--</strong>
+              <small>越低越接近盲猜地带</small>
+            </article>
+          </div>
+          <section class="share-panel" aria-label="分享战绩图">
+            <div>
+              <h3>分享战绩图</h3>
+              <p>方形卡片会把本局成绩和复盘重点放在一张图里。</p>
+            </div>
+            <img id="share-preview" alt="Rating;Gate 分享战绩图预览" />
+          </section>
+        </div>
+      </section>
       <div class="dialog-actions">
         <button class="ghost-button" id="copy-result" type="button">复制战绩</button>
+        <button class="ghost-button" id="download-share" type="button">保存分享图</button>
         <button class="primary-button" id="dialog-restart" type="button">再来一局</button>
       </div>
     </div>
@@ -654,7 +715,17 @@ const byId = {
   restart: $('restart') as HTMLButtonElement,
   dialogRestart: $('dialog-restart') as HTMLButtonElement,
   copyResult: $('copy-result') as HTMLButtonElement,
+  downloadShare: $('download-share') as HTMLButtonElement,
   resultDialog: $('result-dialog') as HTMLDialogElement,
+  reviewSummary: $('review-summary'),
+  reviewHardest: $('review-hardest'),
+  reviewHardestDetail: $('review-hardest-detail'),
+  reviewBiggestMiss: $('review-biggest-miss'),
+  reviewBiggestMissDetail: $('review-biggest-miss-detail'),
+  reviewAverageDiff: $('review-average-diff'),
+  accuracyRing: $('accuracy-ring'),
+  accuracyRingValue: $('accuracy-ring-value'),
+  sharePreview: $('share-preview') as HTMLImageElement,
   timedReadyDialog: $('timed-ready-dialog') as HTMLDialogElement,
   timedBackClassic: $('timed-back-classic') as HTMLButtonElement,
   timedStart: $('timed-start') as HTMLButtonElement,
@@ -1863,6 +1934,8 @@ function restartGame() {
   timeLeft = TIME_LIMIT
   stats = { total: 0, correct: 0, streak: 0, bestStreak: 0 }
   diffBuckets = [0, 0, 0, 0]
+  answerReviews = []
+  shareImageDataUrl = ''
   seen = new Set()
   firstRound = true
   selectedSide = null
@@ -1898,6 +1971,19 @@ function select(side: Side) {
   const result = judgeAnswer(left, right, side)
   isTie = result.isTie
   winningSide = result.winningSide
+  const winningSubject = result.winningSide === 'left' ? left : right
+  const selectedSubject = side === 'left' ? left : right
+  answerReviews.push({
+    leftTitle: titleOf(left),
+    rightTitle: titleOf(right),
+    leftScore: left.score,
+    rightScore: right.score,
+    selectedTitle: titleOf(selectedSubject),
+    winningTitle: titleOf(winningSubject),
+    correct: result.correct,
+    diff: result.diff,
+    round: stats.total + 1,
+  })
   stats = updateStats(stats, result.correct)
   if (!result.correct && mode === 'classic') lives -= 1
   diffBuckets = addDiffBucket(diffBuckets, result.diff)
@@ -1950,6 +2036,215 @@ function renderDiffBars() {
     .join('')
 }
 
+function shortTitle(value: string, maxLength = 18) {
+  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value
+}
+
+function reviewTitle(review: AnswerReview | null) {
+  if (!review) return '--'
+  return `${shortTitle(review.leftTitle)} vs ${shortTitle(review.rightTitle)}`
+}
+
+function drawWrappedText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number,
+  maxLines = 2,
+) {
+  const chars = [...text]
+  let line = ''
+  let currentY = y
+  let lineCount = 0
+  for (const char of chars) {
+    const nextLine = `${line}${char}`
+    if (ctx.measureText(nextLine).width > maxWidth && line) {
+      lineCount += 1
+      const shouldTruncate = lineCount >= maxLines
+      ctx.fillText(shouldTruncate ? `${line.slice(0, Math.max(0, line.length - 1))}…` : line, x, currentY)
+      if (shouldTruncate) return currentY + lineHeight
+      line = char
+      currentY += lineHeight
+    } else {
+      line = nextLine
+    }
+  }
+  if (line) ctx.fillText(line, x, currentY)
+  return currentY + lineHeight
+}
+
+function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
+  const safeRadius = Math.min(radius, width / 2, height / 2)
+  ctx.beginPath()
+  ctx.moveTo(x + safeRadius, y)
+  ctx.arcTo(x + width, y, x + width, y + height, safeRadius)
+  ctx.arcTo(x + width, y + height, x, y + height, safeRadius)
+  ctx.arcTo(x, y + height, x, y, safeRadius)
+  ctx.arcTo(x, y, x + width, y, safeRadius)
+  ctx.closePath()
+}
+
+function fillRoundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+  fillStyle: string | CanvasGradient,
+) {
+  roundRectPath(ctx, x, y, width, height, radius)
+  ctx.fillStyle = fillStyle
+  ctx.fill()
+}
+
+function shareTitleForScore() {
+  const accuracy = stats.total ? Math.round((stats.correct / stats.total) * 100) : 0
+  if (stats.correct >= 30 || accuracy >= 85) return '评分观测者'
+  if (stats.correct >= 15 || accuracy >= 70) return '鉴分手感在线'
+  if (stats.bestStreak >= 5) return '连击潜力股'
+  return '评分雷达校准中'
+}
+
+function buildReviewSummary() {
+  const accuracy = stats.total ? Math.round((stats.correct / stats.total) * 100) : 0
+  const averageDiff = answerReviews.length
+    ? answerReviews.reduce((sum, review) => sum + review.diff, 0) / answerReviews.length
+    : 0
+  const hardest = answerReviews.reduce<AnswerReview | null>(
+    (current, review) => (!current || review.diff < current.diff ? review : current),
+    null,
+  )
+  const biggestMiss = answerReviews
+    .filter((review) => !review.correct)
+    .reduce<AnswerReview | null>((current, review) => (!current || review.diff > current.diff ? review : current), null)
+  return { accuracy, averageDiff, hardest, biggestMiss }
+}
+
+function createShareImage(reason: string) {
+  const { accuracy, averageDiff, hardest, biggestMiss } = buildReviewSummary()
+  const canvas = document.createElement('canvas')
+  canvas.width = 1080
+  canvas.height = 1080
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return ''
+
+  const gradient = ctx.createLinearGradient(0, 0, 1080, 1080)
+  gradient.addColorStop(0, '#f8f4f7')
+  gradient.addColorStop(0.45, '#f3f6f7')
+  gradient.addColorStop(1, '#eceff3')
+  ctx.fillStyle = gradient
+  ctx.fillRect(0, 0, 1080, 1080)
+
+  fillRoundRect(ctx, 72, 72, 936, 936, 44, 'rgba(255,255,255,0.92)')
+
+  ctx.fillStyle = '#a93660'
+  ctx.font = '800 34px "Microsoft YaHei", sans-serif'
+  ctx.fillText('Rating;Gate', 124, 152)
+  ctx.fillStyle = '#6f7480'
+  ctx.font = '500 25px "Microsoft YaHei", sans-serif'
+  ctx.fillText(`${mediaLabels[settings.mediaKind]} · ${mode === 'timed' ? '限时挑战' : '经典挑战'} · ${reason}`, 124, 196)
+
+  ctx.fillStyle = '#17181d'
+  ctx.font = '800 58px "Microsoft YaHei", sans-serif'
+  ctx.fillText(shareTitleForScore(), 124, 286)
+
+  ctx.lineWidth = 34
+  ctx.lineCap = 'round'
+  ctx.strokeStyle = '#edf0f4'
+  ctx.beginPath()
+  ctx.arc(838, 238, 104, -Math.PI / 2, Math.PI * 1.5)
+  ctx.stroke()
+  ctx.strokeStyle = '#a93660'
+  ctx.beginPath()
+  ctx.arc(838, 238, 104, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (accuracy / 100))
+  ctx.stroke()
+  ctx.fillStyle = '#17181d'
+  ctx.font = '800 44px "Microsoft YaHei", sans-serif'
+  ctx.textAlign = 'center'
+  ctx.fillText(`${accuracy}%`, 838, 244)
+  ctx.fillStyle = '#6f7480'
+  ctx.font = '600 22px "Microsoft YaHei", sans-serif'
+  ctx.fillText('正确率', 838, 282)
+  ctx.textAlign = 'left'
+
+  const cards = [
+    ['答对', `${stats.correct}/${stats.total}`],
+    ['最高连击', `${stats.bestStreak}`],
+    ['平均分差', `${averageDiff.toFixed(1)} 分`],
+  ]
+  cards.forEach(([label, value], index) => {
+    const x = 124 + index * 286
+    fillRoundRect(ctx, x, 360, 250, 132, 24, '#f5f6f8')
+    ctx.fillStyle = '#6f7480'
+    ctx.font = '600 25px "Microsoft YaHei", sans-serif'
+    ctx.fillText(label, x + 26, 409)
+    ctx.fillStyle = '#17181d'
+    ctx.font = '800 44px "Microsoft YaHei", sans-serif'
+    ctx.fillText(value, x + 26, 464)
+  })
+
+  ctx.fillStyle = '#17181d'
+  ctx.font = '800 34px "Microsoft YaHei", sans-serif'
+  ctx.fillText('本局复盘', 124, 584)
+  const reviewRows = [
+    ['最险题', hardest ? `${reviewTitle(hardest)} · 分差 ${hardest.diff.toFixed(1)}` : '暂无记录'],
+    ['最大误判', biggestMiss ? `${reviewTitle(biggestMiss)} · 分差 ${biggestMiss.diff.toFixed(1)}` : '本局没有误判'],
+  ]
+  reviewRows.forEach(([label, value], index) => {
+    const y = 628 + index * 126
+    fillRoundRect(ctx, 124, y, 832, 98, 22, index === 1 ? 'rgba(216,95,134,0.08)' : '#f8f9fa')
+    ctx.fillStyle = '#a93660'
+    ctx.font = '700 24px "Microsoft YaHei", sans-serif'
+    ctx.fillText(label, 156, y + 39)
+    ctx.fillStyle = '#17181d'
+    ctx.font = '700 27px "Microsoft YaHei", sans-serif'
+    drawWrappedText(ctx, value, 156, y + 73, 750, 32, 1)
+  })
+
+  const diffLabels = ['0-0.4', '0.5-0.9', '1.0-1.4', '1.5+']
+  const maxBucket = Math.max(...diffBuckets, 1)
+  ctx.fillStyle = '#17181d'
+  ctx.font = '800 30px "Microsoft YaHei", sans-serif'
+  ctx.fillText('分差分布', 124, 854)
+  diffBuckets.forEach((value, index) => {
+    const x = 124 + index * 206
+    const height = Math.max(10, Math.round((value / maxBucket) * 88))
+    fillRoundRect(ctx, x, 936 - height, 132, height, 18, index === 0 ? '#a93660' : '#c7d3df')
+    ctx.fillStyle = '#6f7480'
+    ctx.font = '600 21px "Microsoft YaHei", sans-serif'
+    ctx.fillText(diffLabels[index], x, 972)
+    ctx.fillStyle = '#17181d'
+    ctx.font = '800 26px "Microsoft YaHei", sans-serif'
+    ctx.fillText(`${value}`, x + 98, 972)
+  })
+
+  ctx.fillStyle = '#6f7480'
+  ctx.font = '500 22px "Microsoft YaHei", sans-serif'
+  ctx.fillText('数据来源 Bangumi · ratinggate.cn', 124, 1002)
+  return canvas.toDataURL('image/png')
+}
+
+function renderReview(reason: string) {
+  const { accuracy, averageDiff, hardest, biggestMiss } = buildReviewSummary()
+  byId.reviewSummary.textContent = `${stats.total} 题 · ${accuracy}% 正确率`
+  byId.reviewHardest.textContent = hardest ? reviewTitle(hardest) : '--'
+  byId.reviewHardestDetail.textContent = hardest
+    ? `第 ${hardest.round} 题 · 分差 ${hardest.diff.toFixed(1)}`
+    : '本局还没有可复盘题目'
+  byId.reviewBiggestMiss.textContent = biggestMiss ? reviewTitle(biggestMiss) : '本局没有误判'
+  byId.reviewBiggestMissDetail.textContent = biggestMiss
+    ? `选了 ${shortTitle(biggestMiss.selectedTitle)}，答案是 ${shortTitle(biggestMiss.winningTitle)}`
+    : '保持住，这局很稳'
+  byId.reviewAverageDiff.textContent = `${averageDiff.toFixed(1)} 分`
+  byId.accuracyRing.style.setProperty('--accuracy', `${accuracy}%`)
+  byId.accuracyRingValue.textContent = `${accuracy}%`
+  shareImageDataUrl = createShareImage(reason)
+  byId.sharePreview.src = shareImageDataUrl
+}
+
 function endGame(reason: string) {
   if (phase === 'ended') return
   stopTimer()
@@ -1964,6 +2259,7 @@ function endGame(reason: string) {
   $('result-streak').textContent = `${stats.bestStreak} 连`
   $('result-accuracy').textContent = `${accuracy}%`
   $('diff-bars').innerHTML = renderDiffBars()
+  renderReview(reason)
   render()
   byId.resultDialog.showModal()
 }
@@ -2100,6 +2396,32 @@ function applyPreset(name: PresetName) {
   restartGame()
 }
 
+function resultShareText() {
+  const { accuracy, averageDiff, hardest, biggestMiss } = buildReviewSummary()
+  const lines = [
+    `Rating;Gate ${mediaLabels[settings.mediaKind]}${mode === 'timed' ? '限时' : '经典'}挑战`,
+    `答对 ${stats.correct}/${stats.total}，正确率 ${accuracy}%，最高连击 ${stats.bestStreak}`,
+    `平均分差 ${averageDiff.toFixed(1)} 分`,
+  ]
+  if (hardest) lines.push(`最险题：${hardest.leftTitle} vs ${hardest.rightTitle}，分差 ${hardest.diff.toFixed(1)}`)
+  if (biggestMiss) {
+    lines.push(`最大误判：选了 ${biggestMiss.selectedTitle}，答案是 ${biggestMiss.winningTitle}`)
+  } else {
+    lines.push('最大误判：本局没有误判')
+  }
+  return lines.join('\n')
+}
+
+function downloadShareImage() {
+  if (!shareImageDataUrl) return
+  const link = document.createElement('a')
+  link.href = shareImageDataUrl
+  link.download = `rating-gate-${settings.mediaKind}-${Date.now()}.png`
+  document.body.append(link)
+  link.click()
+  link.remove()
+}
+
 function applyGalgameAudience(audience: GalgameAudience) {
   settings = { ...settings, galgameAudience: settings.galgameAudience === audience ? 'all' : audience }
   activePreset = detectPreset(settings)
@@ -2130,11 +2452,11 @@ function bindEvents() {
     restartGame()
   })
   byId.copyResult.addEventListener('click', async () => {
-    const text = `Rating;Gate：${mode === 'timed' ? '限时' : '经典'}模式答对 ${stats.correct}/${stats.total}，最高连击 ${stats.bestStreak}`
-    await navigator.clipboard.writeText(text)
+    await navigator.clipboard.writeText(resultShareText())
     byId.copyResult.textContent = '已复制'
     window.setTimeout(() => (byId.copyResult.textContent = '复制战绩'), 1200)
   })
+  byId.downloadShare.addEventListener('click', downloadShareImage)
   byId.roomCodeInput.addEventListener('input', () => {
     byId.roomCodeInput.value = normalizeRoomCode(byId.roomCodeInput.value)
   })
