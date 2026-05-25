@@ -29,20 +29,81 @@ import {
   type Stats,
 } from './game-core'
 
-type AppView = 'solo' | 'multiplayer'
+type AppView = 'solo' | 'multiplayer' | 'admin'
 type Phase = 'loading' | 'ready' | 'playing' | 'reveal' | 'ended'
 type YearRange = 'all' | 'before2010' | 'decade2010' | 'after2020'
 
 interface AnswerReview {
+  leftId: number
+  rightId: number
   leftTitle: string
   rightTitle: string
   leftScore: number
   rightScore: number
+  selectedId: number
+  winningId: number
+  selectedSide: Side
+  winningSide: Side
   selectedTitle: string
   winningTitle: string
   correct: boolean
   diff: number
   round: number
+}
+
+interface AnalyticsAnswer {
+  leftId: number
+  rightId: number
+  selectedId: number
+}
+
+interface AdminDistribution {
+  mediaKind: MediaKind
+  mode: Mode
+  length: number
+  buckets: number[]
+  total: number
+  updatedAt: string
+}
+
+interface AdminPairStats {
+  mediaKind: MediaKind
+  mode: Mode
+  subjectAName: string
+  subjectBName: string
+  scoreA: number
+  scoreB: number
+  scoreDiffBucket: string
+  shownCount: number
+  correctCount: number
+  wrongCount: number
+  accuracy: number
+}
+
+interface AdminAnalyticsReport {
+  ok: boolean
+  generatedAt: string
+  updatedAt: string
+  consent: {
+    shownCount: number
+    acceptedCount: number
+    declinedCount: number
+    updatedAt: string
+  }
+  games: {
+    total: number
+    byMediaKind: Record<MediaKind, number>
+    byMode: Record<Mode, number>
+    accuracyBuckets: number[]
+    distributions: AdminDistribution[]
+  }
+  pairs: {
+    scannedPairs: number
+    totalShown: number
+    totalCorrect: number
+    totalWrong: number
+    topPairs: AdminPairStats[]
+  }
 }
 
 interface SeedMeta {
@@ -119,6 +180,15 @@ const YEAR_MAX_LIMIT = 2030
 const ROOM_WS_URL =
   import.meta.env.VITE_WS_URL ??
   (location.protocol === 'https:' ? `wss://${location.host}/ws` : 'ws://127.0.0.1:8787')
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ??
+  (location.hostname === '127.0.0.1' || location.hostname === 'localhost' ? 'http://127.0.0.1:8787' : '')
+const apiUrl = (path: string) => `${API_BASE_URL}${path}`
+const ANALYTICS_URL = import.meta.env.VITE_ANALYTICS_URL ?? apiUrl('/api/results')
+const ANALYTICS_CONSENT_URL = apiUrl('/api/analytics/consent')
+const ADMIN_ANALYTICS_URL = apiUrl('/api/admin/analytics')
+const ANALYTICS_CONSENT_KEY = 'rating-gate-analytics-consent-v1'
+const ANALYTICS_MAX_ANSWERS = 80
 
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('Missing #app')
@@ -161,6 +231,12 @@ let stats: Stats = { total: 0, correct: 0, streak: 0, bestStreak: 0 }
 let diffBuckets = [0, 0, 0, 0]
 let answerReviews: AnswerReview[] = []
 let shareImageDataUrl = ''
+let soloGameId = crypto.randomUUID()
+let soloAnalyticsSubmitted = false
+let analyticsSessionConsent: 'accepted' | 'declined' | null = null
+let roomAnswerReviews: AnswerReview[] = []
+let roomAnalyticsSeen = new Set<string>()
+let roomAnalyticsSubmittedKey = ''
 let activePreset: PresetName | null = 'standard'
 let activeRoomPreset: PresetName | null = 'standard'
 let settings: Settings = createDefaultSettings()
@@ -594,13 +670,105 @@ app.innerHTML = `
       </div>
     </section>
 
+    <section class="admin-view" id="admin-view" hidden>
+      <div class="admin-hero">
+        <div>
+          <p class="eyebrow">数据后台</p>
+          <h2>匿名游玩统计</h2>
+          <p>输入后台密钥后查看聚合数据。这里不展示单局原始记录，也不包含用户名、IP 或房间码。</p>
+        </div>
+        <button class="ghost-button" id="admin-back" type="button">回到游戏</button>
+      </div>
+
+      <form class="admin-auth" id="admin-auth">
+        <label class="control-field">
+          <span>后台密钥</span>
+          <input id="admin-token" type="password" autocomplete="off" placeholder="Cloudflare Worker Secret" />
+        </label>
+        <button class="primary-button" type="submit">读取数据</button>
+      </form>
+
+      <p class="room-message admin-message" id="admin-message">密钥只会用于本次请求，不会保存在浏览器里。</p>
+
+      <div class="admin-dashboard" id="admin-dashboard" hidden>
+        <section class="admin-metrics" id="admin-metrics"></section>
+
+        <section class="admin-grid">
+          <article class="admin-card admin-card-wide admin-card-histogram">
+            <div class="panel-title compact-title">
+              <h3>正确率直方图</h3>
+              <span>柱状为局数，曲线为趋势</span>
+            </div>
+            <div class="admin-bars" id="admin-accuracy-bars"></div>
+          </article>
+
+          <article class="admin-card">
+            <div class="panel-title compact-title">
+              <h3>题库占比</h3>
+              <span>有效赛果</span>
+            </div>
+            <div class="admin-bars" id="admin-media-bars"></div>
+          </article>
+
+          <article class="admin-card">
+            <div class="panel-title compact-title">
+              <h3>模式占比</h3>
+              <span>经典 / 限时</span>
+            </div>
+            <div class="admin-bars" id="admin-mode-bars"></div>
+          </article>
+
+          <article class="admin-card">
+            <div class="panel-title compact-title">
+              <h3>同意统计率</h3>
+              <span>弹窗展示与选择</span>
+            </div>
+            <div class="admin-consent-card" id="admin-consent-card"></div>
+          </article>
+
+          <article class="admin-card admin-card-wide">
+            <div class="panel-title compact-title">
+              <h3>常见题目组合</h3>
+              <span id="admin-pair-summary">--</span>
+            </div>
+            <div class="admin-table" id="admin-pair-table"></div>
+          </article>
+        </section>
+      </div>
+    </section>
+
     <footer class="site-footer">
       <span>数据来源 <a href="https://bangumi.tv/" target="_blank" rel="noopener">Bangumi</a></span>
       <span>参考来源 <a href="https://bangumi-master.logicry.cc/" target="_blank" rel="noopener">目标是Bangumi大师</a></span>
       <span>仓库 <a href="https://github.com/inm2002/Rating_Gate_web" target="_blank" rel="noopener">inm2002/Rating_Gate_web</a></span>
+      <span><button class="footer-link-button" id="analytics-settings" type="button">游玩数据设置</button></span>
       <span id="data-updated">数据更新时间 --</span>
     </footer>
   </main>
+
+  <dialog id="analytics-consent-dialog" class="result-dialog consent-dialog">
+    <div class="result-box">
+      <p class="result-kicker">匿名游玩数据</p>
+      <h2>一起把统计做得更可靠</h2>
+      <p class="dialog-copy">
+        Rating;Gate 希望收集匿名的局内统计，用来以后分析玩家正确率分布、题目组合难度和常见误判组合。
+        同时会记录匿名的弹窗展示与选择次数，用于评估统计样本代表性。数据不会包含昵称、IP、房间码或个人身份，也不会保存完整个人答题历史；不同意也完全不影响游玩。
+      </p>
+      <div class="consent-points">
+        <span>会记录：题库、模式、答对数量、正确率区间、每题的两个作品 ID 和你的选择</span>
+        <span>会聚合统计：弹窗展示次数、同意次数、拒绝次数</span>
+        <span>不会记录：用户名、具体身份、房间成员关系、完整个人历史</span>
+      </div>
+      <label class="consent-remember">
+        <input id="analytics-remember" type="checkbox" />
+        <span>记住我的选择，下次进入不再询问</span>
+      </label>
+      <div class="dialog-actions">
+        <button class="ghost-button" id="analytics-decline" type="button">不参与收集</button>
+        <button class="primary-button" id="analytics-accept" type="button">同意匿名统计</button>
+      </div>
+    </div>
+  </dialog>
 
   <dialog id="timed-ready-dialog" class="result-dialog timed-ready-dialog">
     <div class="result-box">
@@ -665,17 +833,26 @@ app.innerHTML = `
           <section class="share-panel" aria-label="分享战绩图">
             <div>
               <h3>分享战绩图</h3>
-              <p>方形卡片会把本局成绩和复盘重点放在一张图里。</p>
+              <p>点击预览可以放大查看，再决定是否保存。</p>
             </div>
-            <img id="share-preview" alt="Rating;Gate 分享战绩图预览" />
+            <button class="share-preview-button" id="share-preview-open" type="button" aria-label="放大查看分享战绩图">
+              <img id="share-preview" alt="Rating;Gate 分享战绩图预览" />
+            </button>
           </section>
         </div>
       </section>
-      <div class="dialog-actions">
+      <div class="dialog-actions result-actions">
         <button class="ghost-button" id="copy-result" type="button">复制战绩</button>
         <button class="ghost-button" id="download-share" type="button">保存分享图</button>
         <button class="primary-button" id="dialog-restart" type="button">再来一局</button>
       </div>
+    </div>
+  </dialog>
+
+  <dialog id="share-image-dialog" class="result-dialog share-image-dialog">
+    <div class="share-image-box">
+      <button id="share-image-close" class="share-image-close" type="button" aria-label="关闭分享图预览">×</button>
+      <img id="share-preview-large" alt="放大的 Rating;Gate 分享战绩图" />
     </div>
   </dialog>
 
@@ -709,6 +886,19 @@ const byId = {
   viewMultiplayer: $('view-multiplayer') as HTMLButtonElement,
   soloView: $('solo-view'),
   multiplayerView: $('multiplayer-view'),
+  adminView: $('admin-view'),
+  adminBack: $('admin-back') as HTMLButtonElement,
+  adminAuth: $('admin-auth') as HTMLFormElement,
+  adminToken: $('admin-token') as HTMLInputElement,
+  adminMessage: $('admin-message'),
+  adminDashboard: $('admin-dashboard'),
+  adminMetrics: $('admin-metrics'),
+  adminAccuracyBars: $('admin-accuracy-bars'),
+  adminMediaBars: $('admin-media-bars'),
+  adminModeBars: $('admin-mode-bars'),
+  adminConsentCard: $('admin-consent-card'),
+  adminPairSummary: $('admin-pair-summary'),
+  adminPairTable: $('admin-pair-table'),
   soloModeSwitch: $('solo-mode-switch'),
   modeClassic: $('mode-classic') as HTMLButtonElement,
   modeTimed: $('mode-timed') as HTMLButtonElement,
@@ -726,10 +916,19 @@ const byId = {
   accuracyRing: $('accuracy-ring'),
   accuracyRingValue: $('accuracy-ring-value'),
   sharePreview: $('share-preview') as HTMLImageElement,
+  sharePreviewOpen: $('share-preview-open') as HTMLButtonElement,
+  shareImageDialog: $('share-image-dialog') as HTMLDialogElement,
+  sharePreviewLarge: $('share-preview-large') as HTMLImageElement,
+  shareImageClose: $('share-image-close') as HTMLButtonElement,
   timedReadyDialog: $('timed-ready-dialog') as HTMLDialogElement,
   timedBackClassic: $('timed-back-classic') as HTMLButtonElement,
   timedStart: $('timed-start') as HTMLButtonElement,
   dataUpdated: $('data-updated'),
+  analyticsSettings: $('analytics-settings') as HTMLButtonElement,
+  analyticsConsentDialog: $('analytics-consent-dialog') as HTMLDialogElement,
+  analyticsRemember: $('analytics-remember') as HTMLInputElement,
+  analyticsAccept: $('analytics-accept') as HTMLButtonElement,
+  analyticsDecline: $('analytics-decline') as HTMLButtonElement,
   soloAnimePresets: $('solo-anime-presets'),
   presetButtons: [...document.querySelectorAll<HTMLButtonElement>('[data-preset]')],
   mediaButtons: [...document.querySelectorAll<HTMLButtonElement>('[data-media-kind]')],
@@ -1011,11 +1210,14 @@ function escapeHtml(value: string) {
 
 function renderAppView() {
   const isSolo = appView === 'solo'
+  const isMultiplayer = appView === 'multiplayer'
+  const isAdmin = appView === 'admin'
   byId.soloView.hidden = !isSolo
-  byId.multiplayerView.hidden = isSolo
+  byId.multiplayerView.hidden = !isMultiplayer
+  byId.adminView.hidden = !isAdmin
   byId.soloModeSwitch.hidden = !isSolo
   byId.viewSolo.setAttribute('aria-pressed', isSolo ? 'true' : 'false')
-  byId.viewMultiplayer.setAttribute('aria-pressed', isSolo ? 'false' : 'true')
+  byId.viewMultiplayer.setAttribute('aria-pressed', isMultiplayer ? 'true' : 'false')
 }
 
 function switchView(nextView: AppView) {
@@ -1024,6 +1226,11 @@ function switchView(nextView: AppView) {
     stopTimer()
     if (byId.timedReadyDialog.open) byId.timedReadyDialog.close()
     void connectRoomSocket()
+  }
+  if (nextView === 'admin') {
+    stopTimer()
+    if (byId.timedReadyDialog.open) byId.timedReadyDialog.close()
+    if (byId.analyticsConsentDialog.open) byId.analyticsConsentDialog.close()
   }
   renderAppView()
   renderRoom()
@@ -1084,6 +1291,9 @@ function handleRoomMessage(event: MessageEvent<string>) {
       remoteGame = null
       window.clearInterval(roomClockTimer)
       if (byId.roomResultDialog.open) byId.roomResultDialog.close()
+      roomAnswerReviews = []
+      roomAnalyticsSeen = new Set()
+      roomAnalyticsSubmittedKey = ''
     }
     const you = remoteRoom.players.find((player) => player.id === remoteRoom?.youId)
     localRoom = {
@@ -1102,6 +1312,7 @@ function handleRoomMessage(event: MessageEvent<string>) {
     return
   }
   remoteGame = message.game
+  captureRoomAnswerReview(remoteGame)
   renderRoom()
   syncRoomClock()
 }
@@ -1414,6 +1625,7 @@ function showRoomResultDialog(room: RemoteRoom) {
       </div>`,
     )
     .join('')
+  submitRoomAnalytics(room)
   byId.roomResultDialog.showModal()
 }
 
@@ -1936,6 +2148,8 @@ function restartGame() {
   diffBuckets = [0, 0, 0, 0]
   answerReviews = []
   shareImageDataUrl = ''
+  soloGameId = crypto.randomUUID()
+  soloAnalyticsSubmitted = false
   seen = new Set()
   firstRound = true
   selectedSide = null
@@ -1974,10 +2188,16 @@ function select(side: Side) {
   const winningSubject = result.winningSide === 'left' ? left : right
   const selectedSubject = side === 'left' ? left : right
   answerReviews.push({
+    leftId: left.id,
+    rightId: right.id,
     leftTitle: titleOf(left),
     rightTitle: titleOf(right),
     leftScore: left.score,
     rightScore: right.score,
+    selectedId: selectedSubject.id,
+    winningId: winningSubject.id,
+    selectedSide: side,
+    winningSide: result.winningSide,
     selectedTitle: titleOf(selectedSubject),
     winningTitle: titleOf(winningSubject),
     correct: result.correct,
@@ -2027,52 +2247,139 @@ function advanceRound() {
 function renderDiffBars() {
   const labels = ['0-0.2', '0.3-0.5', '0.6-1.0', '1.1+']
   const total = Math.max(1, diffBuckets.reduce((sum, value) => sum + value, 0))
+  const peakIndex = getPeakDiffBucketIndex(diffBuckets)
   return labels
     .map((label, index) => {
       const value = diffBuckets[index] ?? 0
       const width = Math.max(4, Math.round((value / total) * 100))
-      return `<div class="diff-row"><span>${label}</span><i style="width:${width}%"></i><b>${value}</b></div>`
+      const highlightClass = index === peakIndex ? ' is-highlight' : ''
+      return `<div class="diff-row${highlightClass}"><span>${label}</span><i style="width:${width}%"></i><b>${value}</b></div>`
     })
     .join('')
 }
 
-function shortTitle(value: string, maxLength = 18) {
-  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value
+function getPeakDiffBucketIndex(buckets: number[]) {
+  const max = Math.max(...buckets)
+  if (max <= 0) return -1
+  return buckets.findIndex((value) => value === max)
 }
 
 function reviewTitle(review: AnswerReview | null) {
   if (!review) return '--'
-  return `${shortTitle(review.leftTitle)} vs ${shortTitle(review.rightTitle)}`
+  return `${review.leftTitle} vs ${review.rightTitle}`
 }
 
-function drawWrappedText(
+function wrapCanvasText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  const lines: string[] = []
+  let line = ''
+  for (const char of [...text]) {
+    const nextLine = `${line}${char}`
+    if (line && ctx.measureText(nextLine).width > maxWidth) {
+      lines.push(line)
+      line = char
+    } else {
+      line = nextLine
+    }
+  }
+  if (line) lines.push(line)
+  return lines
+}
+
+function ellipsizeCanvasText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  if (ctx.measureText(text).width <= maxWidth) return text
+  let value = text
+  while (value.length > 0 && ctx.measureText(`${value}…`).width > maxWidth) {
+    value = value.slice(0, -1)
+  }
+  return `${value}…`
+}
+
+function adaptiveTextLayout(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  options: {
+    size: number
+    minSize?: number
+    weight?: string
+    color?: string
+    lineHeight?: number
+    maxLines?: number
+    align?: CanvasTextAlign
+  },
+) {
+  const minSize = options.minSize ?? Math.max(18, options.size - 8)
+  const weight = options.weight ?? '700'
+  const lineHeightRatio = options.lineHeight ?? 1.22
+  const maxLines = options.maxLines ?? 2
+  let size = options.size
+  let lines: string[] = []
+  do {
+    ctx.font = `${weight} ${size}px "Microsoft YaHei", sans-serif`
+    lines = wrapCanvasText(ctx, text, maxWidth)
+    if (lines.length <= maxLines || size <= minSize) break
+    size -= 1
+  } while (size >= minSize)
+
+  if (lines.length > maxLines) {
+    lines = lines.slice(0, maxLines)
+    lines[maxLines - 1] = ellipsizeCanvasText(ctx, lines[maxLines - 1] ?? '', maxWidth)
+  }
+
+  return { lines, size, weight, lineHeight: Math.round(size * lineHeightRatio), align: options.align ?? 'left' }
+}
+
+function drawAdaptiveText(
   ctx: CanvasRenderingContext2D,
   text: string,
   x: number,
   y: number,
   maxWidth: number,
-  lineHeight: number,
-  maxLines = 2,
+  options: {
+    size: number
+    minSize?: number
+    weight?: string
+    color?: string
+    lineHeight?: number
+    maxLines?: number
+    align?: CanvasTextAlign
+  },
 ) {
-  const chars = [...text]
-  let line = ''
-  let currentY = y
-  let lineCount = 0
-  for (const char of chars) {
-    const nextLine = `${line}${char}`
-    if (ctx.measureText(nextLine).width > maxWidth && line) {
-      lineCount += 1
-      const shouldTruncate = lineCount >= maxLines
-      ctx.fillText(shouldTruncate ? `${line.slice(0, Math.max(0, line.length - 1))}…` : line, x, currentY)
-      if (shouldTruncate) return currentY + lineHeight
-      line = char
-      currentY += lineHeight
-    } else {
-      line = nextLine
-    }
-  }
-  if (line) ctx.fillText(line, x, currentY)
-  return currentY + lineHeight
+  const layout = adaptiveTextLayout(ctx, text, maxWidth, options)
+  ctx.fillStyle = options.color ?? '#17181d'
+  ctx.font = `${layout.weight} ${layout.size}px "Microsoft YaHei", sans-serif`
+  ctx.textAlign = layout.align
+  layout.lines.forEach((line, index) => ctx.fillText(line, x, y + index * layout.lineHeight))
+  ctx.textAlign = 'left'
+  return y + Math.max(1, layout.lines.length) * layout.lineHeight
+}
+
+function drawAdaptiveTextInBox(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  boxHeight: number,
+  options: {
+    size: number
+    minSize?: number
+    weight?: string
+    color?: string
+    lineHeight?: number
+    maxLines?: number
+    align?: CanvasTextAlign
+  },
+) {
+  const layout = adaptiveTextLayout(ctx, text, maxWidth, options)
+  const textHeight = Math.max(1, layout.lines.length) * layout.lineHeight
+  const firstBaseline = y + Math.max(0, (boxHeight - textHeight) / 2) + layout.size
+  ctx.fillStyle = options.color ?? '#17181d'
+  ctx.font = `${layout.weight} ${layout.size}px "Microsoft YaHei", sans-serif`
+  ctx.textAlign = layout.align
+  layout.lines.forEach((line, index) => ctx.fillText(line, x, firstBaseline + index * layout.lineHeight))
+  ctx.textAlign = 'left'
+  return { ...layout, textHeight }
 }
 
 function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
@@ -2127,25 +2434,32 @@ function createShareImage(reason: string) {
   const { accuracy, averageDiff, hardest, biggestMiss } = buildReviewSummary()
   const canvas = document.createElement('canvas')
   canvas.width = 1080
-  canvas.height = 1080
+  canvas.height = 1700
   const ctx = canvas.getContext('2d')
   if (!ctx) return ''
 
-  const gradient = ctx.createLinearGradient(0, 0, 1080, 1080)
+  const gradient = ctx.createLinearGradient(0, 0, 1080, 1700)
   gradient.addColorStop(0, '#f8f4f7')
   gradient.addColorStop(0.45, '#f3f6f7')
   gradient.addColorStop(1, '#eceff3')
   ctx.fillStyle = gradient
-  ctx.fillRect(0, 0, 1080, 1080)
+  ctx.fillRect(0, 0, 1080, 1700)
 
-  fillRoundRect(ctx, 72, 72, 936, 936, 44, 'rgba(255,255,255,0.92)')
+  fillRoundRect(ctx, 72, 72, 936, 1556, 44, 'rgba(255,255,255,0.92)')
 
   ctx.fillStyle = '#a93660'
   ctx.font = '800 34px "Microsoft YaHei", sans-serif'
   ctx.fillText('Rating;Gate', 124, 152)
   ctx.fillStyle = '#6f7480'
   ctx.font = '500 25px "Microsoft YaHei", sans-serif'
-  ctx.fillText(`${mediaLabels[settings.mediaKind]} · ${mode === 'timed' ? '限时挑战' : '经典挑战'} · ${reason}`, 124, 196)
+  drawAdaptiveText(
+    ctx,
+    `${mediaLabels[settings.mediaKind]} · ${mode === 'timed' ? '限时挑战' : '经典挑战'} · ${reason}`,
+    124,
+    196,
+    560,
+    { size: 25, minSize: 21, weight: '500', color: '#6f7480', maxLines: 1 },
+  )
 
   ctx.fillStyle = '#17181d'
   ctx.font = '800 58px "Microsoft YaHei", sans-serif'
@@ -2181,49 +2495,95 @@ function createShareImage(reason: string) {
     ctx.fillStyle = '#6f7480'
     ctx.font = '600 25px "Microsoft YaHei", sans-serif'
     ctx.fillText(label, x + 26, 409)
-    ctx.fillStyle = '#17181d'
-    ctx.font = '800 44px "Microsoft YaHei", sans-serif'
-    ctx.fillText(value, x + 26, 464)
+    drawAdaptiveText(ctx, value, x + 26, 464, 196, {
+      size: 44,
+      minSize: 32,
+      weight: '800',
+      color: '#17181d',
+      maxLines: 1,
+    })
   })
 
   ctx.fillStyle = '#17181d'
   ctx.font = '800 34px "Microsoft YaHei", sans-serif'
-  ctx.fillText('本局复盘', 124, 584)
+  ctx.fillText('本局复盘', 124, 574)
   const reviewRows = [
-    ['最险题', hardest ? `${reviewTitle(hardest)} · 分差 ${hardest.diff.toFixed(1)}` : '暂无记录'],
-    ['最大误判', biggestMiss ? `${reviewTitle(biggestMiss)} · 分差 ${biggestMiss.diff.toFixed(1)}` : '本局没有误判'],
+    [
+      '最险题',
+      hardest ? `${hardest.leftTitle} vs ${hardest.rightTitle} · 分差 ${hardest.diff.toFixed(1)}` : '暂无记录',
+    ],
+    [
+      '最大误判',
+      biggestMiss
+        ? `选了 ${biggestMiss.selectedTitle}，答案是 ${biggestMiss.winningTitle} · 分差 ${biggestMiss.diff.toFixed(1)}`
+        : '本局没有误判',
+    ],
   ]
+  let reviewCursor = 620
   reviewRows.forEach(([label, value], index) => {
-    const y = 628 + index * 126
-    fillRoundRect(ctx, 124, y, 832, 98, 22, index === 1 ? 'rgba(216,95,134,0.08)' : '#f8f9fa')
+    const layout = adaptiveTextLayout(ctx, value, 750, {
+      size: 27,
+      minSize: 20,
+      weight: '700',
+      lineHeight: 1.24,
+      maxLines: 5,
+    })
+    const rowHeight = Math.max(132, Math.min(246, 76 + layout.lines.length * layout.lineHeight))
+    const y = reviewCursor
+    fillRoundRect(ctx, 124, y, 832, rowHeight, 24, index === 1 ? 'rgba(216,95,134,0.08)' : '#f8f9fa')
     ctx.fillStyle = '#a93660'
     ctx.font = '700 24px "Microsoft YaHei", sans-serif'
     ctx.fillText(label, 156, y + 39)
-    ctx.fillStyle = '#17181d'
-    ctx.font = '700 27px "Microsoft YaHei", sans-serif'
-    drawWrappedText(ctx, value, 156, y + 73, 750, 32, 1)
+    drawAdaptiveTextInBox(ctx, value, 156, y + 54, 750, rowHeight - 72, {
+      size: 27,
+      minSize: 20,
+      weight: '700',
+      color: '#17181d',
+      lineHeight: 1.24,
+      maxLines: 5,
+    })
+    reviewCursor += rowHeight + 28
   })
 
-  const diffLabels = ['0-0.4', '0.5-0.9', '1.0-1.4', '1.5+']
+  const diffLabels = ['0-0.2', '0.3-0.5', '0.6-1.0', '1.1+']
   const maxBucket = Math.max(...diffBuckets, 1)
+  const peakBucketIndex = getPeakDiffBucketIndex(diffBuckets)
   ctx.fillStyle = '#17181d'
   ctx.font = '800 30px "Microsoft YaHei", sans-serif'
-  ctx.fillText('分差分布', 124, 854)
+  const chartTitleY = Math.max(1060, reviewCursor + 44)
+  ctx.fillText('分差分布', 124, chartTitleY)
+  ctx.fillStyle = '#6f7480'
+  ctx.font = '600 22px "Microsoft YaHei", sans-serif'
+  ctx.fillText('题目分差越小，越接近盲猜地带', 264, chartTitleY)
+  const chartTop = chartTitleY + 54
+  const chartBase = chartTop + 220
+  const barWidth = 118
   diffBuckets.forEach((value, index) => {
-    const x = 124 + index * 206
-    const height = Math.max(10, Math.round((value / maxBucket) * 88))
-    fillRoundRect(ctx, x, 936 - height, 132, height, 18, index === 0 ? '#a93660' : '#c7d3df')
+    const centerX = 190 + index * 220
+    const height = value === 0 ? 58 : Math.max(58, Math.round((value / maxBucket) * (chartBase - chartTop)))
+    const barY = chartBase - height
+    fillRoundRect(
+      ctx,
+      centerX - barWidth / 2,
+      barY,
+      barWidth,
+      height,
+      20,
+      value === 0 ? '#e5e9ef' : index === peakBucketIndex ? '#a93660' : '#c7d3df',
+    )
+    ctx.fillStyle = value === 0 || index !== peakBucketIndex ? '#17181d' : '#fff'
+    ctx.font = '800 24px "Microsoft YaHei", sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText(`${value}`, centerX, barY + height / 2 + 9)
     ctx.fillStyle = '#6f7480'
     ctx.font = '600 21px "Microsoft YaHei", sans-serif'
-    ctx.fillText(diffLabels[index], x, 972)
-    ctx.fillStyle = '#17181d'
-    ctx.font = '800 26px "Microsoft YaHei", sans-serif'
-    ctx.fillText(`${value}`, x + 98, 972)
+    ctx.fillText(diffLabels[index], centerX, chartBase + 48)
+    ctx.textAlign = 'left'
   })
 
   ctx.fillStyle = '#6f7480'
   ctx.font = '500 22px "Microsoft YaHei", sans-serif'
-  ctx.fillText('数据来源 Bangumi · ratinggate.cn', 124, 1002)
+  ctx.fillText('数据来源 Bangumi · ratinggate.cn', 124, 1600)
   return canvas.toDataURL('image/png')
 }
 
@@ -2236,13 +2596,14 @@ function renderReview(reason: string) {
     : '本局还没有可复盘题目'
   byId.reviewBiggestMiss.textContent = biggestMiss ? reviewTitle(biggestMiss) : '本局没有误判'
   byId.reviewBiggestMissDetail.textContent = biggestMiss
-    ? `选了 ${shortTitle(biggestMiss.selectedTitle)}，答案是 ${shortTitle(biggestMiss.winningTitle)}`
+    ? `选了 ${biggestMiss.selectedTitle}，答案是 ${biggestMiss.winningTitle}`
     : '保持住，这局很稳'
   byId.reviewAverageDiff.textContent = `${averageDiff.toFixed(1)} 分`
   byId.accuracyRing.style.setProperty('--accuracy', `${accuracy}%`)
   byId.accuracyRingValue.textContent = `${accuracy}%`
   shareImageDataUrl = createShareImage(reason)
   byId.sharePreview.src = shareImageDataUrl
+  byId.sharePreviewLarge.src = shareImageDataUrl
 }
 
 function endGame(reason: string) {
@@ -2260,6 +2621,7 @@ function endGame(reason: string) {
   $('result-accuracy').textContent = `${accuracy}%`
   $('diff-bars').innerHTML = renderDiffBars()
   renderReview(reason)
+  submitSoloAnalytics(reason)
   render()
   byId.resultDialog.showModal()
 }
@@ -2422,6 +2784,415 @@ function downloadShareImage() {
   link.remove()
 }
 
+function analyticsConsent() {
+  return (localStorage.getItem(ANALYTICS_CONSENT_KEY) as 'accepted' | 'declined' | null) ?? analyticsSessionConsent
+}
+
+function persistedAnalyticsConsent() {
+  return localStorage.getItem(ANALYTICS_CONSENT_KEY) as 'accepted' | 'declined' | null
+}
+
+function setAnalyticsConsent(value: 'accepted' | 'declined', remember: boolean) {
+  analyticsSessionConsent = value
+  if (remember) localStorage.setItem(ANALYTICS_CONSENT_KEY, value)
+  else localStorage.removeItem(ANALYTICS_CONSENT_KEY)
+}
+
+function canCollectAnalytics() {
+  return analyticsConsent() === 'accepted'
+}
+
+function showAnalyticsConsentDialog(force = false) {
+  const persisted = persistedAnalyticsConsent()
+  if (!force && persisted) return
+  byId.analyticsRemember.checked = Boolean(persisted)
+  if (!byId.analyticsConsentDialog.open) {
+    byId.analyticsConsentDialog.showModal()
+    submitAnalyticsConsentEvent('shown')
+  }
+}
+
+function analyticsAnswersFromReviews(reviews: AnswerReview[]): AnalyticsAnswer[] {
+  return reviews.slice(0, ANALYTICS_MAX_ANSWERS).map((review) => ({
+    leftId: review.leftId,
+    rightId: review.rightId,
+    selectedId: review.selectedId,
+  }))
+}
+
+function submitAnalytics(payload: unknown) {
+  if (!canCollectAnalytics()) return
+  void fetch(ANALYTICS_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+    keepalive: true,
+  }).catch(() => {
+    // 统计失败不影响游玩体验。
+  })
+}
+
+function submitAnalyticsConsentAccepted() {
+  submitAnalyticsConsentEvent('accepted')
+}
+
+function submitAnalyticsConsentEvent(event: 'shown' | 'accepted' | 'declined') {
+  void fetch(ANALYTICS_CONSENT_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ event }),
+    keepalive: true,
+  }).catch(() => {
+    // 弹窗事件统计失败不影响用户选择。
+  })
+}
+
+function submitSoloAnalytics(reason: string) {
+  if (soloAnalyticsSubmitted || answerReviews.length === 0) return
+  soloAnalyticsSubmitted = true
+  submitAnalytics({
+    version: 1,
+    source: 'solo',
+    gameId: soloGameId,
+    mediaKind: settings.mediaKind,
+    mode,
+    length: mode === 'timed' ? TIME_LIMIT : stats.total,
+    reason,
+    settings,
+    result: {
+      total: stats.total,
+      correct: stats.correct,
+      bestStreak: stats.bestStreak,
+      averageDiff: Number(buildReviewSummary().averageDiff.toFixed(3)),
+      diffBuckets,
+    },
+    answers: analyticsAnswersFromReviews(answerReviews),
+  })
+}
+
+function formatDateTime(value: string) {
+  if (!value) return '--'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '--'
+  return date.toLocaleString('zh-CN', { hour12: false })
+}
+
+function percent(value: number, total: number) {
+  if (total <= 0) return 0
+  return Math.round((value / total) * 100)
+}
+
+function renderAdminBars(
+  rows: { label: string; value: number; hint?: string }[],
+  options: { max?: number; highlightMax?: boolean } = {},
+) {
+  const maxValue = options.max ?? Math.max(...rows.map((row) => row.value), 1)
+  const peak = options.highlightMax ? Math.max(...rows.map((row) => row.value), 0) : -1
+  return rows
+    .map((row) => {
+      const width = Math.max(row.value > 0 ? 3 : 1, Math.round((row.value / Math.max(1, maxValue)) * 100))
+      const highlight = row.value > 0 && row.value === peak ? ' is-highlight' : ''
+      return `
+        <div class="admin-bar${highlight}">
+          <div><span>${escapeHtml(row.label)}</span><b>${row.value}</b></div>
+          <i><em style="width:${width}%"></em></i>
+          ${row.hint ? `<small>${escapeHtml(row.hint)}</small>` : ''}
+        </div>
+      `
+    })
+    .join('')
+}
+
+function smoothSvgPath(points: { x: number; y: number }[]) {
+  if (points.length === 0) return ''
+  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`
+  return points
+    .map((point, index) => {
+      if (index === 0) return `M ${point.x} ${point.y}`
+      const previous = points[index - 1]
+      const controlOffset = (point.x - previous.x) / 2
+      return `C ${previous.x + controlOffset} ${previous.y}, ${point.x - controlOffset} ${point.y}, ${point.x} ${point.y}`
+    })
+    .join(' ')
+}
+
+function renderAccuracyHistogram(values: number[]) {
+  const labels = ['0-9', '10-19', '20-29', '30-39', '40-49', '50-59', '60-69', '70-79', '80-89', '90-100']
+  const width = 760
+  const height = 360
+  const chart = { left: 58, top: 28, right: 22, bottom: 54 }
+  const plotWidth = width - chart.left - chart.right
+  const plotHeight = height - chart.top - chart.bottom
+  const maxValue = Math.max(...values, 1)
+  const sampleTotal = values.reduce((sum, value) => sum + value, 0)
+  const nonZeroBins = values.filter((value) => value > 0).length
+  const shouldShowTrend = sampleTotal >= 30 && nonZeroBins >= 3
+  const barGap = 8
+  const barWidth = plotWidth / values.length - barGap
+  const peak = Math.max(...values, 0)
+  const ticks = Array.from({ length: 5 }, (_, index) => Math.round((maxValue / 4) * index))
+  const smoothed = values.map((value, index) => {
+    const previous = values[index - 1] ?? value
+    const next = values[index + 1] ?? value
+    return (previous + value * 2 + next) / 4
+  })
+  const densityPoints = smoothed.map((value, index) => {
+    const x = chart.left + index * (plotWidth / values.length) + barWidth / 2 + barGap / 2
+    const y = chart.top + plotHeight - (value / maxValue) * plotHeight
+    return { x: Number(x.toFixed(1)), y: Number(y.toFixed(1)) }
+  })
+  const densityPath = smoothSvgPath(densityPoints)
+  const areaPath = `${densityPath} L ${densityPoints[densityPoints.length - 1]?.x ?? chart.left} ${chart.top + plotHeight} L ${densityPoints[0]?.x ?? chart.left} ${chart.top + plotHeight} Z`
+  const axisBottom = chart.top + plotHeight
+  const bars = values
+    .map((value, index) => {
+      const barHeight = value === 0 ? 2 : Math.max(4, (value / maxValue) * plotHeight)
+      const x = chart.left + index * (plotWidth / values.length) + barGap / 2
+      const y = axisBottom - barHeight
+      const isPeak = value > 0 && value === peak
+      return `
+        <g>
+          <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${barHeight.toFixed(1)}" rx="5" class="${isPeak ? 'histogram-bar histogram-bar-peak' : 'histogram-bar'}" />
+          <text x="${(x + barWidth / 2).toFixed(1)}" y="${(y - 8).toFixed(1)}" class="chart-value">${value}</text>
+          <text x="${(x + barWidth / 2).toFixed(1)}" y="${axisBottom + 25}" class="chart-x-label">${labels[index]}</text>
+        </g>
+      `
+    })
+    .join('')
+  const grid = ticks
+    .map((tick) => {
+      const y = axisBottom - (tick / maxValue) * plotHeight
+      return `
+        <g>
+          <line x1="${chart.left}" x2="${width - chart.right}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" class="chart-grid" />
+          <text x="${chart.left - 12}" y="${(y + 4).toFixed(1)}" class="chart-y-label">${tick}</text>
+        </g>
+      `
+    })
+    .join('')
+  return `
+    <div class="admin-chart-shell">
+      <svg class="admin-histogram" viewBox="0 0 ${width} ${height}" role="img" aria-label="正确率分布直方图">
+        ${grid}
+        <line x1="${chart.left}" x2="${chart.left}" y1="${chart.top}" y2="${axisBottom}" class="chart-axis" />
+        <line x1="${chart.left}" x2="${width - chart.right}" y1="${axisBottom}" y2="${axisBottom}" class="chart-axis" />
+        ${bars}
+        ${shouldShowTrend ? `<path d="${areaPath}" class="density-area" /><path d="${densityPath}" class="density-line" />` : ''}
+        <text x="${chart.left}" y="${height - 10}" class="chart-axis-title">正确率区间（%）</text>
+        <text x="18" y="${chart.top + 4}" class="chart-axis-title chart-axis-title-y">局数</text>
+      </svg>
+      <div class="chart-legend">
+        <span><i class="legend-bar"></i>完成局数</span>
+        ${
+          shouldShowTrend
+            ? '<span><i class="legend-line"></i>平滑趋势</span>'
+            : '<span class="legend-note">样本不足 30 局或分布过于集中时暂不绘制趋势线</span>'
+        }
+      </div>
+    </div>
+  `
+}
+
+function renderAdminReport(report: AdminAnalyticsReport) {
+  const gameTotal = report.games.total
+  const answerAccuracy =
+    report.pairs.totalShown > 0 ? Math.round((report.pairs.totalCorrect / report.pairs.totalShown) * 100) : 0
+  const consentDecisions = report.consent.acceptedCount + report.consent.declinedCount
+  const consentShownBase = Math.max(report.consent.shownCount, consentDecisions)
+  const consentRate = percent(report.consent.acceptedCount, consentDecisions)
+  const consentResponseRate = percent(consentDecisions, consentShownBase)
+  byId.adminMetrics.innerHTML = [
+    ['有效赛果', `${gameTotal} 局`, `最近更新 ${formatDateTime(report.updatedAt)}`],
+    ['同意率', `${consentRate}%`, `${report.consent.acceptedCount}/${consentDecisions || 0} 次选择`],
+    ['答题样本', `${report.pairs.totalShown} 题`, `${answerAccuracy}% 平均正确率`],
+    ['题目组合', `${report.pairs.scannedPairs} 组`, '后台最多扫描 1000 组'],
+  ]
+    .map(
+      ([label, value, hint]) => `
+        <article>
+          <span>${label}</span>
+          <strong>${value}</strong>
+          <small>${hint}</small>
+        </article>
+      `,
+    )
+    .join('')
+
+  const accuracyLabels = ['0-9%', '10-19%', '20-29%', '30-39%', '40-49%', '50-59%', '60-69%', '70-79%', '80-89%', '90-100%']
+  byId.adminAccuracyBars.innerHTML = `
+    ${renderAccuracyHistogram(report.games.accuracyBuckets)}
+    <div class="histogram-summary">
+      ${accuracyLabels
+        .map((label, index) => {
+          const value = report.games.accuracyBuckets[index] ?? 0
+          return `<span><b>${label}</b>${value} 局 · ${percent(value, gameTotal)}%</span>`
+        })
+        .join('')}
+    </div>
+  `
+  byId.adminMediaBars.innerHTML = renderAdminBars(
+    (Object.keys(report.games.byMediaKind) as MediaKind[]).map((kind) => ({
+      label: mediaLabels[kind],
+      value: report.games.byMediaKind[kind] ?? 0,
+      hint: `${percent(report.games.byMediaKind[kind] ?? 0, gameTotal)}%`,
+    })),
+    { highlightMax: true },
+  )
+  byId.adminModeBars.innerHTML = renderAdminBars(
+    [
+      { label: '经典', value: report.games.byMode.classic ?? 0, hint: `${percent(report.games.byMode.classic ?? 0, gameTotal)}%` },
+      { label: '限时', value: report.games.byMode.timed ?? 0, hint: `${percent(report.games.byMode.timed ?? 0, gameTotal)}%` },
+    ],
+    { highlightMax: true },
+  )
+  byId.adminConsentCard.innerHTML = `
+    <div class="consent-rate-ring" style="--rate:${consentRate * 3.6}deg">
+      <strong>${consentRate}%</strong>
+      <span>同意率</span>
+    </div>
+      <div class="consent-rate-list">
+      <div><span>展示</span><b>${report.consent.shownCount}</b></div>
+      <div><span>同意</span><b>${report.consent.acceptedCount}</b></div>
+      <div><span>拒绝</span><b>${report.consent.declinedCount}</b></div>
+      <div><span>选择响应率</span><b>${consentResponseRate}%</b></div>
+    </div>
+  `
+
+  byId.adminPairSummary.textContent = `${report.pairs.totalShown} 次出现 · ${report.pairs.totalWrong} 次误判`
+  if (report.pairs.topPairs.length === 0) {
+    byId.adminPairTable.innerHTML = '<p class="empty-state">还没有足够的题目组合数据。</p>'
+  } else {
+    byId.adminPairTable.innerHTML = report.pairs.topPairs
+      .map(
+        (pair) => `
+          <article>
+            <div>
+              <strong>${escapeHtml(pair.subjectAName)} vs ${escapeHtml(pair.subjectBName)}</strong>
+              <span>${mediaLabels[pair.mediaKind]} · ${pair.mode === 'classic' ? '经典' : '限时'} · 分差 ${escapeHtml(pair.scoreDiffBucket)}</span>
+            </div>
+            <dl>
+              <div><dt>出现</dt><dd>${pair.shownCount}</dd></div>
+              <div><dt>正确率</dt><dd>${pair.accuracy}%</dd></div>
+              <div><dt>误判</dt><dd>${pair.wrongCount}</dd></div>
+            </dl>
+          </article>
+        `,
+      )
+      .join('')
+  }
+  byId.adminDashboard.hidden = false
+  byId.adminMessage.textContent = `数据生成时间 ${formatDateTime(report.generatedAt)}。`
+}
+
+async function loadAdminAnalytics() {
+  const token = byId.adminToken.value.trim()
+  if (!token) {
+    byId.adminMessage.textContent = '请输入后台密钥。'
+    return
+  }
+  byId.adminMessage.textContent = '正在读取统计数据...'
+  byId.adminDashboard.hidden = true
+  try {
+    const response = await fetch(ADMIN_ANALYTICS_URL, {
+      headers: { authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    })
+    const data = (await response.json()) as AdminAnalyticsReport & { error?: string }
+    if (!response.ok || !data.ok) {
+      byId.adminMessage.textContent =
+        data.error === 'unauthorized'
+          ? '密钥不正确，无法读取后台数据。'
+          : data.error === 'admin_not_configured'
+            ? '后台密钥还没有在 Cloudflare Worker Secret 中配置。'
+            : '后台数据读取失败，请稍后再试。'
+      return
+    }
+    renderAdminReport(data)
+  } catch {
+    byId.adminMessage.textContent = '无法连接统计接口，请确认 Worker 已部署并配置 /api/* 路由。'
+  }
+}
+
+function subjectFromRemote(subject: RemoteSubject | undefined): RatedSubject | null {
+  if (!subject || typeof subject.score !== 'number') return null
+  return {
+    id: subject.id,
+    mediaKind: subject.mediaKind,
+    name: subject.name,
+    nameCn: subject.nameCn,
+    score: subject.score,
+    votes: subject.votes,
+    rank: subject.rank,
+    date: subject.date,
+    image: subject.image,
+    tags: [],
+    platform: subject.platform,
+    adult: subject.adult,
+  }
+}
+
+function captureRoomAnswerReview(game: RemoteGame) {
+  if (!remoteRoom || !game.reveal) return
+  const reveal =
+    game.mode === 'classic' && game.reveal.answers
+      ? { ...game.reveal, ...game.reveal.answers[remoteRoom.youId] }
+      : game.reveal
+  const pair = game.mode === 'classic' && game.reveal.pair ? game.reveal.pair : reveal.pair
+  if (!pair || !reveal.selectedSide || !reveal.winningSide || typeof reveal.correct !== 'boolean') return
+  const leftSubject = subjectFromRemote(pair.left)
+  const rightSubject = subjectFromRemote(pair.right)
+  if (!leftSubject || !rightSubject) return
+  const key = `${remoteRoom.code}:${remoteRoom.youId}:${game.mode}:${game.round}:${leftSubject.id}:${rightSubject.id}:${reveal.selectedSide}`
+  if (roomAnalyticsSeen.has(key)) return
+  roomAnalyticsSeen.add(key)
+  const selectedSubject = reveal.selectedSide === 'left' ? leftSubject : rightSubject
+  const winningSubject = reveal.winningSide === 'left' ? leftSubject : rightSubject
+  roomAnswerReviews.push({
+    leftId: leftSubject.id,
+    rightId: rightSubject.id,
+    leftTitle: titleOf(leftSubject),
+    rightTitle: titleOf(rightSubject),
+    leftScore: leftSubject.score,
+    rightScore: rightSubject.score,
+    selectedId: selectedSubject.id,
+    winningId: winningSubject.id,
+    selectedSide: reveal.selectedSide,
+    winningSide: reveal.winningSide,
+    selectedTitle: titleOf(selectedSubject),
+    winningTitle: titleOf(winningSubject),
+    correct: reveal.correct,
+    diff: typeof reveal.diff === 'number' ? reveal.diff : Math.abs(leftSubject.score - rightSubject.score),
+    round: game.round,
+  })
+}
+
+function submitRoomAnalytics(room: RemoteRoom) {
+  if (roomAnalyticsSubmittedKey === roomResultShownKey || roomAnswerReviews.length === 0) return
+  const you = room.players.find((player) => player.id === room.youId)
+  if (!you) return
+  roomAnalyticsSubmittedKey = roomResultShownKey
+  const averageDiff =
+    roomAnswerReviews.reduce((sum, review) => sum + review.diff, 0) / Math.max(1, roomAnswerReviews.length)
+  const buckets = roomAnswerReviews.reduce((next, review) => addDiffBucket(next, review.diff), [0, 0, 0, 0])
+  submitAnalytics({
+    version: 1,
+    source: 'multiplayer',
+    gameId: crypto.randomUUID(),
+    mediaKind: room.mediaKind,
+    mode: room.mode,
+    length: room.length,
+    settings: room.settings,
+    result: {
+      total: you.total,
+      correct: you.score,
+      bestStreak: you.streak,
+      averageDiff: Number(averageDiff.toFixed(3)),
+      diffBuckets: buckets,
+    },
+    answers: analyticsAnswersFromReviews(roomAnswerReviews),
+  })
+}
+
 function applyGalgameAudience(audience: GalgameAudience) {
   settings = { ...settings, galgameAudience: settings.galgameAudience === audience ? 'all' : audience }
   activePreset = detectPreset(settings)
@@ -2457,6 +3228,48 @@ function bindEvents() {
     window.setTimeout(() => (byId.copyResult.textContent = '复制战绩'), 1200)
   })
   byId.downloadShare.addEventListener('click', downloadShareImage)
+  byId.analyticsSettings.addEventListener('click', () => showAnalyticsConsentDialog(true))
+  byId.analyticsAccept.addEventListener('click', () => {
+    setAnalyticsConsent('accepted', byId.analyticsRemember.checked)
+    submitAnalyticsConsentAccepted()
+    byId.analyticsConsentDialog.close()
+    showToast(
+      byId.analyticsRemember.checked
+        ? '已开启匿名统计，并记住这个选择。'
+        : '本次已开启匿名统计，下次进入时仍会询问。',
+    )
+  })
+  byId.analyticsDecline.addEventListener('click', () => {
+    setAnalyticsConsent('declined', byId.analyticsRemember.checked)
+    submitAnalyticsConsentEvent('declined')
+    byId.analyticsConsentDialog.close()
+    showToast(
+      byId.analyticsRemember.checked
+        ? '已关闭匿名统计，并记住这个选择。'
+        : '本次不会收集匿名统计，下次进入时仍会询问。',
+    )
+  })
+  byId.adminBack.addEventListener('click', () => {
+    history.replaceState(null, '', `${location.pathname}${location.search}`)
+    switchView('solo')
+  })
+  byId.adminAuth.addEventListener('submit', (event) => {
+    event.preventDefault()
+    void loadAdminAnalytics()
+  })
+  window.addEventListener('hashchange', () => {
+    if (location.hash === '#admin') switchView('admin')
+    else if (appView === 'admin') switchView('solo')
+  })
+  byId.sharePreviewOpen.addEventListener('click', () => {
+    if (!shareImageDataUrl) return
+    byId.sharePreviewLarge.src = shareImageDataUrl
+    byId.shareImageDialog.showModal()
+  })
+  byId.shareImageClose.addEventListener('click', () => byId.shareImageDialog.close())
+  byId.shareImageDialog.addEventListener('click', (event) => {
+    if (event.target === byId.shareImageDialog) byId.shareImageDialog.close()
+  })
   byId.roomCodeInput.addEventListener('input', () => {
     byId.roomCodeInput.value = normalizeRoomCode(byId.roomCodeInput.value)
   })
@@ -2590,6 +3403,8 @@ async function boot() {
     syncSettings()
     syncRoomSettings()
     restartGame()
+    if (location.hash === '#admin') switchView('admin')
+    if (location.hash !== '#admin') window.setTimeout(() => showAnalyticsConsentDialog(), 350)
   } catch (error) {
     console.error(error)
     setPrompt(`未找到${mediaLabels[settings.mediaKind]}题库，请先运行 npm run data:seed。`, 'bad')

@@ -11,9 +11,6 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260521.0",
     "typescript": "~6.0.2",
-    "wrangler": "^4.49.0"
-  },
-  "dependencies": {
-    "rating-gate": "file:.."
+    "wrangler": "^4.94.0"
   }
 }

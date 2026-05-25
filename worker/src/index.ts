@@ -17,6 +17,64 @@ type GalgameAudience = 'all' | 'allAges' | 'adult'
 interface Env {
   ROOM_HUB: DurableObjectNamespace
   SEED_URL?: string
+  SEED_BASE_URL?: string
+  ADMIN_TOKEN?: string
+}
+
+interface AnalyticsAnswer {
+  leftId: number
+  rightId: number
+  selectedId: number
+}
+
+interface AnalyticsPayload {
+  version?: number
+  source?: 'solo' | 'multiplayer'
+  gameId?: string
+  mediaKind?: MediaKind
+  mode?: Mode
+  length?: number
+  answers?: AnalyticsAnswer[]
+}
+
+interface DistributionStats {
+  buckets: number[]
+  total: number
+  updatedAt: string
+}
+
+interface ConsentStats {
+  shownCount: number
+  acceptedCount: number
+  declinedCount: number
+  updatedAt: string
+}
+
+interface AdminRateStats {
+  count: number
+  resetAt: number
+  blockedUntil: number
+  updatedAt: string
+}
+
+interface PairStats {
+  mediaKind: MediaKind
+  mode: Mode
+  subjectAId: number
+  subjectBId: number
+  scoreA: number
+  scoreB: number
+  scoreDiffBucket: string
+  shownCount: number
+  correctCount: number
+  wrongCount: number
+  aSelectedCount: number
+  bSelectedCount: number
+  aWinnerCount: number
+  bWinnerCount: number
+  aWinnerCorrectCount: number
+  bWinnerCorrectCount: number
+  updatedAt: string
 }
 
 interface Settings {
@@ -93,6 +151,9 @@ interface AnswerResult {
 }
 
 const maxPlayers = 8
+const adminRateWindowMs = 10 * 60 * 1000
+const adminRateBlockMs = 10 * 60 * 1000
+const adminMaxFailedAttempts = 8
 const currentYear = new Date().getFullYear()
 const mediaKinds: MediaKind[] = ['anime', 'manga', 'lightNovel', 'galgame']
 const seedFiles: Record<MediaKind, string> = {
@@ -131,7 +192,13 @@ const tagFilterTerms: Partial<Record<MediaTagFilterKey, string[]>> = {
 export default {
   async fetch(request: Request, env: Env) {
     const url = new URL(request.url)
-    if (!url.pathname.startsWith('/ws') && !url.pathname.startsWith('/websocket')) {
+    if (
+      !url.pathname.startsWith('/ws') &&
+      !url.pathname.startsWith('/websocket') &&
+      !url.pathname.startsWith('/api/results') &&
+      !url.pathname.startsWith('/api/analytics/consent') &&
+      !url.pathname.startsWith('/api/admin/analytics')
+    ) {
       return new Response('Not found', { status: 404 })
     }
     const id = env.ROOM_HUB.idFromName('global-room-hub')
@@ -153,6 +220,19 @@ export class RoomHub {
   }
 
   async fetch(request: Request) {
+    const url = new URL(request.url)
+    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: this.corsHeaders() })
+    if (url.pathname.startsWith('/api/analytics/consent')) {
+      return this.handleAnalyticsConsent(request)
+    }
+    if (url.pathname.startsWith('/api/admin/analytics')) {
+      return this.handleAdminAnalytics(request)
+    }
+    if (url.pathname.startsWith('/api/results')) {
+      await this.loadSubjectSeeds(request)
+      return this.handleAnalyticsResult(request)
+    }
+
     const upgradeHeader = request.headers.get('upgrade')
     if (upgradeHeader?.toLowerCase() === 'websocket') {
       await this.loadSubjectSeeds(request)
@@ -175,13 +255,23 @@ export class RoomHub {
     )
   }
 
+  private corsHeaders() {
+    return {
+      'access-control-allow-origin': '*',
+      'access-control-allow-methods': 'GET, POST, OPTIONS',
+      'access-control-allow-headers': 'authorization, content-type',
+      'cache-control': 'no-store',
+    }
+  }
+
   private async loadSubjectSeeds(request: Request) {
     if (this.allSubjects.size === mediaKinds.length) return this.allSubjects
     const origin = new URL(request.url).origin
+    const seedBaseUrl = this.env.SEED_BASE_URL?.replace(/\/$/, '')
     this.seedPromise ??= Promise.all(
       mediaKinds.map(async (mediaKind) => {
         const animeSeedUrl = mediaKind === 'anime' ? this.env.SEED_URL : undefined
-        const response = await fetch(animeSeedUrl || `${origin}/${seedFiles[mediaKind]}`)
+        const response = await fetch(animeSeedUrl || `${seedBaseUrl || origin}/${seedFiles[mediaKind]}`)
         if (!response.ok) throw new Error(`Failed to load ${mediaKind} seed: HTTP ${response.status}`)
         const rows = (await response.json()) as Anime[]
         return [mediaKind, rows.map((row) => ({ ...row, mediaKind: row.mediaKind ?? mediaKind }))] as const
@@ -298,9 +388,402 @@ export class RoomHub {
     return Number.isFinite(raw) ? Math.max(1, Math.min(50, raw)) : 10
   }
 
+  private accuracyBucket(correct: number, total: number) {
+    if (total <= 0) return 0
+    const accuracy = Math.max(0, Math.min(100, Math.round((correct / total) * 100)))
+    return Math.min(9, Math.floor(accuracy / 10))
+  }
+
+  private diffBucket(diff: number) {
+    if (diff <= 0.2) return '0-0.2'
+    if (diff <= 0.5) return '0.3-0.5'
+    if (diff <= 1) return '0.6-1.0'
+    return '1.1+'
+  }
+
+  private analyticsLength(mode: Mode, value: unknown) {
+    const raw = this.sanitizeLength(mode, value)
+    return mode === 'timed' ? raw : Math.max(1, Math.min(50, raw))
+  }
+
+  private analyticsSubjectMap(mediaKind: MediaKind) {
+    return new Map((this.allSubjects.get(mediaKind) ?? []).map((subject) => [subject.id, subject]))
+  }
+
+  private async isDuplicateGame(gameId: string) {
+    const key = 'analytics:recent-games'
+    const recent = ((await this.state.storage.get<string[]>(key)) ?? []).slice(-500)
+    if (recent.includes(gameId)) return true
+    recent.push(gameId)
+    await this.state.storage.put(key, recent.slice(-500))
+    return false
+  }
+
+  private async handleAnalyticsConsent(request: Request) {
+    if (request.method !== 'POST') {
+      return Response.json({ ok: false, error: 'method_not_allowed' }, { status: 405, headers: this.corsHeaders() })
+    }
+    let event: 'shown' | 'accepted' | 'declined' = 'accepted'
+    try {
+      const payload = (await request.json()) as { event?: string }
+      if (payload.event === 'shown' || payload.event === 'accepted' || payload.event === 'declined') event = payload.event
+    } catch {
+      event = 'accepted'
+    }
+    const key = 'analytics:consent:accepted'
+    const saved = await this.state.storage.get<Partial<ConsentStats>>(key)
+    const current = {
+      shownCount: saved?.shownCount ?? 0,
+      acceptedCount: saved?.acceptedCount ?? 0,
+      declinedCount: saved?.declinedCount ?? 0,
+      updatedAt: saved?.updatedAt ?? '',
+    } satisfies ConsentStats
+    if (event === 'shown') current.shownCount += 1
+    if (event === 'accepted') current.acceptedCount += 1
+    if (event === 'declined') current.declinedCount += 1
+    current.updatedAt = new Date().toISOString()
+    await this.state.storage.put(key, current)
+    return Response.json({ ok: true, event }, { headers: this.corsHeaders() })
+  }
+
+  private adminTokenFrom(request: Request) {
+    const header = request.headers.get('authorization') ?? ''
+    if (header.toLowerCase().startsWith('bearer ')) return header.slice(7).trim()
+    return ''
+  }
+
+  private adminTokenMatches(actual: string, expected: string) {
+    const maxLength = Math.max(actual.length, expected.length)
+    let diff = actual.length ^ expected.length
+    for (let index = 0; index < maxLength; index += 1) {
+      diff |= (actual.charCodeAt(index) || 0) ^ (expected.charCodeAt(index) || 0)
+    }
+    return diff === 0
+  }
+
+  private adminClientFingerprint(request: Request) {
+    const forwarded = request.headers.get('cf-connecting-ip') ?? request.headers.get('x-forwarded-for') ?? 'local'
+    const userAgent = request.headers.get('user-agent') ?? 'unknown'
+    return `${forwarded.split(',')[0].trim()}|${userAgent.slice(0, 120)}`
+  }
+
+  private async adminRateKey(request: Request) {
+    const data = new TextEncoder().encode(this.adminClientFingerprint(request))
+    const digest = await crypto.subtle.digest('SHA-256', data)
+    const hex = [...new Uint8Array(digest)]
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('')
+      .slice(0, 32)
+    return `admin:rate:${hex}`
+  }
+
+  private async checkAdminRateLimit(request: Request) {
+    const key = await this.adminRateKey(request)
+    const stats = await this.state.storage.get<AdminRateStats>(key)
+    const now = Date.now()
+    if (!stats) return null
+    if (stats.blockedUntil > now) {
+      const retryAfter = Math.max(1, Math.ceil((stats.blockedUntil - now) / 1000))
+      return Response.json(
+        { ok: false, error: 'too_many_attempts', retryAfter },
+        { status: 429, headers: { ...this.corsHeaders(), 'retry-after': String(retryAfter) } },
+      )
+    }
+    if (stats.resetAt <= now) await this.state.storage.delete(key)
+    return null
+  }
+
+  private async recordAdminFailure(request: Request) {
+    const key = await this.adminRateKey(request)
+    const now = Date.now()
+    const current = await this.state.storage.get<AdminRateStats>(key)
+    const stats =
+      current && current.resetAt > now
+        ? current
+        : ({ count: 0, resetAt: now + adminRateWindowMs, blockedUntil: 0, updatedAt: '' } satisfies AdminRateStats)
+    stats.count += 1
+    stats.updatedAt = new Date().toISOString()
+    if (stats.count >= adminMaxFailedAttempts) stats.blockedUntil = now + adminRateBlockMs
+    await this.state.storage.put(key, stats)
+    if (stats.blockedUntil > now) {
+      const retryAfter = Math.ceil((stats.blockedUntil - now) / 1000)
+      return Response.json(
+        { ok: false, error: 'too_many_attempts', retryAfter },
+        { status: 429, headers: { ...this.corsHeaders(), 'retry-after': String(retryAfter) } },
+      )
+    }
+    return Response.json({ ok: false, error: 'unauthorized' }, { status: 401, headers: this.corsHeaders() })
+  }
+
+  private async clearAdminRateLimit(request: Request) {
+    await this.state.storage.delete(await this.adminRateKey(request))
+  }
+
+  private async handleAdminAnalytics(request: Request) {
+    if (request.method !== 'GET') {
+      return Response.json({ ok: false, error: 'method_not_allowed' }, { status: 405, headers: this.corsHeaders() })
+    }
+    const expected = this.env.ADMIN_TOKEN?.trim()
+    if (!expected) {
+      return Response.json({ ok: false, error: 'admin_not_configured' }, { status: 404, headers: this.corsHeaders() })
+    }
+    const limited = await this.checkAdminRateLimit(request)
+    if (limited) return limited
+    if (!this.adminTokenMatches(this.adminTokenFrom(request), expected)) {
+      return this.recordAdminFailure(request)
+    }
+    await this.clearAdminRateLimit(request)
+    await this.loadSubjectSeeds(request)
+    const report = await this.buildAnalyticsReport()
+    return Response.json({ ok: true, ...report }, { headers: this.corsHeaders() })
+  }
+
+  private async buildAnalyticsReport() {
+    const consent =
+      (await this.state.storage.get<Partial<ConsentStats>>('analytics:consent:accepted')) ??
+      ({ shownCount: 0, acceptedCount: 0, declinedCount: 0, updatedAt: '' } satisfies ConsentStats)
+    const consentStats = {
+      shownCount: consent.shownCount ?? 0,
+      acceptedCount: consent.acceptedCount ?? 0,
+      declinedCount: consent.declinedCount ?? 0,
+      updatedAt: consent.updatedAt ?? '',
+    } satisfies ConsentStats
+    consentStats.shownCount = Math.max(
+      consentStats.shownCount,
+      consentStats.acceptedCount + consentStats.declinedCount,
+    )
+    const distributionEntries = await this.state.storage.list<DistributionStats>({
+      prefix: 'analytics:distribution:',
+      limit: 1000,
+    })
+    const pairEntries = await this.state.storage.list<PairStats>({ prefix: 'analytics:pair:', limit: 1000 })
+    const distributions = [...distributionEntries.entries()].map(([key, stats]) => {
+      const [, , mediaKind, mode, length] = key.split(':') as [string, string, MediaKind, Mode, string]
+      return {
+        key,
+        mediaKind,
+        mode,
+        length: Number(length),
+        buckets: stats.buckets,
+        total: stats.total,
+        updatedAt: stats.updatedAt,
+      }
+    })
+    const accuracyBuckets = Array.from({ length: 10 }, () => 0)
+    const byMediaKind: Record<MediaKind, number> = { anime: 0, manga: 0, lightNovel: 0, galgame: 0 }
+    const byMode: Record<Mode, number> = { classic: 0, timed: 0 }
+    let gameTotal = 0
+    let latest = consentStats.updatedAt
+    for (const item of distributions) {
+      gameTotal += item.total
+      if (mediaKinds.includes(item.mediaKind)) byMediaKind[item.mediaKind] += item.total
+      if (item.mode === 'classic' || item.mode === 'timed') byMode[item.mode] += item.total
+      item.buckets.forEach((value, index) => {
+        accuracyBuckets[index] = (accuracyBuckets[index] ?? 0) + value
+      })
+      if (item.updatedAt > latest) latest = item.updatedAt
+    }
+    const subjectMaps = new Map(
+      mediaKinds.map((kind) => [kind, new Map((this.allSubjects.get(kind) ?? []).map((subject) => [subject.id, subject]))]),
+    )
+    const pairs = [...pairEntries.values()]
+    let pairShownTotal = 0
+    let pairCorrectTotal = 0
+    let pairWrongTotal = 0
+    const topPairs = pairs
+      .map((pair) => {
+        pairShownTotal += pair.shownCount
+        pairCorrectTotal += pair.correctCount
+        pairWrongTotal += pair.wrongCount
+        if (pair.updatedAt > latest) latest = pair.updatedAt
+        const subjects = subjectMaps.get(pair.mediaKind)
+        const subjectA = subjects?.get(pair.subjectAId)
+        const subjectB = subjects?.get(pair.subjectBId)
+        return {
+          mediaKind: pair.mediaKind,
+          mode: pair.mode,
+          subjectAId: pair.subjectAId,
+          subjectBId: pair.subjectBId,
+          subjectAName: subjectA ? this.titleOf(subjectA) : `#${pair.subjectAId}`,
+          subjectBName: subjectB ? this.titleOf(subjectB) : `#${pair.subjectBId}`,
+          scoreA: pair.scoreA,
+          scoreB: pair.scoreB,
+          scoreDiffBucket: pair.scoreDiffBucket,
+          shownCount: pair.shownCount,
+          correctCount: pair.correctCount,
+          wrongCount: pair.wrongCount,
+          accuracy: pair.shownCount > 0 ? Math.round((pair.correctCount / pair.shownCount) * 100) : 0,
+          updatedAt: pair.updatedAt,
+        }
+      })
+      .sort((a, b) => b.shownCount - a.shownCount || b.wrongCount - a.wrongCount)
+      .slice(0, 30)
+
+    return {
+      generatedAt: new Date().toISOString(),
+      updatedAt: latest,
+      consent: consentStats,
+      games: {
+        total: gameTotal,
+        byMediaKind,
+        byMode,
+        accuracyBuckets,
+        distributions,
+      },
+      pairs: {
+        scannedPairs: pairs.length,
+        totalShown: pairShownTotal,
+        totalCorrect: pairCorrectTotal,
+        totalWrong: pairWrongTotal,
+        topPairs,
+      },
+    }
+  }
+
+  private async handleAnalyticsResult(request: Request) {
+    if (request.method !== 'POST') {
+      return Response.json({ ok: false, error: 'method_not_allowed' }, { status: 405, headers: this.corsHeaders() })
+    }
+    const contentLength = Number.parseInt(request.headers.get('content-length') ?? '0', 10)
+    if (Number.isFinite(contentLength) && contentLength > 24000) {
+      return Response.json({ ok: false, error: 'payload_too_large' }, { status: 413, headers: this.corsHeaders() })
+    }
+
+    let payload: AnalyticsPayload
+    try {
+      payload = (await request.json()) as AnalyticsPayload
+    } catch {
+      return Response.json({ ok: false, error: 'invalid_json' }, { status: 400, headers: this.corsHeaders() })
+    }
+
+    const mediaKind = this.sanitizeMediaKind(payload.mediaKind)
+    const mode = this.sanitizeMode(payload.mode)
+    const length = this.analyticsLength(mode, payload.length)
+    const answers = Array.isArray(payload.answers) ? payload.answers.slice(0, 80) : []
+    const gameId = String(payload.gameId ?? '').trim().slice(0, 80)
+    if (!gameId || answers.length === 0) {
+      return Response.json({ ok: false, error: 'missing_game' }, { status: 400, headers: this.corsHeaders() })
+    }
+    if (await this.isDuplicateGame(gameId)) {
+      return Response.json({ ok: true, duplicate: true }, { headers: this.corsHeaders() })
+    }
+
+    const subjects = this.analyticsSubjectMap(mediaKind)
+    const validAnswers = answers
+      .map((answer) => this.normalizeAnalyticsAnswer(answer, subjects))
+      .filter((answer): answer is NonNullable<ReturnType<typeof this.normalizeAnalyticsAnswer>> => Boolean(answer))
+    if (validAnswers.length === 0) {
+      return Response.json({ ok: false, error: 'no_valid_answers' }, { status: 400, headers: this.corsHeaders() })
+    }
+
+    const correct = validAnswers.filter((answer) => answer.correct).length
+    await this.updateDistributionStats(mediaKind, mode, length, correct, validAnswers.length)
+    await this.updatePairStats(mediaKind, mode, validAnswers)
+    return Response.json(
+      {
+        ok: true,
+        acceptedAnswers: validAnswers.length,
+        correct,
+        distributionKey: `analytics:distribution:${mediaKind}:${mode}:${length}`,
+      },
+      { headers: this.corsHeaders() },
+    )
+  }
+
+  private normalizeAnalyticsAnswer(answer: AnalyticsAnswer, subjects: Map<number, Anime>) {
+    const left = subjects.get(Number(answer.leftId))
+    const right = subjects.get(Number(answer.rightId))
+    const selectedId = Number(answer.selectedId)
+    if (!left || !right || left.id === right.id || left.score === right.score) return null
+    if (selectedId !== left.id && selectedId !== right.id) return null
+    const winner = left.score > right.score ? left : right
+    const selected = selectedId === left.id ? left : right
+    return {
+      left,
+      right,
+      selected,
+      winner,
+      correct: selected.id === winner.id,
+      diff: Math.abs(left.score - right.score),
+    }
+  }
+
+  private async updateDistributionStats(
+    mediaKind: MediaKind,
+    mode: Mode,
+    length: number,
+    correct: number,
+    total: number,
+  ) {
+    const key = `analytics:distribution:${mediaKind}:${mode}:${length}`
+    const current =
+      (await this.state.storage.get<DistributionStats>(key)) ??
+      ({ buckets: Array.from({ length: 10 }, () => 0), total: 0, updatedAt: '' } satisfies DistributionStats)
+    const bucket = this.accuracyBucket(correct, total)
+    current.buckets[bucket] = (current.buckets[bucket] ?? 0) + 1
+    current.total += 1
+    current.updatedAt = new Date().toISOString()
+    await this.state.storage.put(key, current)
+  }
+
+  private async updatePairStats(
+    mediaKind: MediaKind,
+    mode: Mode,
+    answers: NonNullable<ReturnType<typeof this.normalizeAnalyticsAnswer>>[],
+  ) {
+    const now = new Date().toISOString()
+    for (const answer of answers) {
+      const [subjectA, subjectB] =
+        answer.left.id < answer.right.id ? [answer.left, answer.right] : [answer.right, answer.left]
+      const key = `analytics:pair:${mediaKind}:${mode}:${subjectA.id}:${subjectB.id}`
+      const current =
+        (await this.state.storage.get<PairStats>(key)) ??
+        ({
+          mediaKind,
+          mode,
+          subjectAId: subjectA.id,
+          subjectBId: subjectB.id,
+          scoreA: subjectA.score,
+          scoreB: subjectB.score,
+          scoreDiffBucket: this.diffBucket(Math.abs(subjectA.score - subjectB.score)),
+          shownCount: 0,
+          correctCount: 0,
+          wrongCount: 0,
+          aSelectedCount: 0,
+          bSelectedCount: 0,
+          aWinnerCount: 0,
+          bWinnerCount: 0,
+          aWinnerCorrectCount: 0,
+          bWinnerCorrectCount: 0,
+          updatedAt: '',
+        } satisfies PairStats)
+      current.shownCount += 1
+      current.correctCount += answer.correct ? 1 : 0
+      current.wrongCount += answer.correct ? 0 : 1
+      if (answer.selected.id === subjectA.id) current.aSelectedCount += 1
+      else current.bSelectedCount += 1
+      if (answer.winner.id === subjectA.id) {
+        current.aWinnerCount += 1
+        if (answer.correct) current.aWinnerCorrectCount += 1
+      } else {
+        current.bWinnerCount += 1
+        if (answer.correct) current.bWinnerCorrectCount += 1
+      }
+      current.scoreA = subjectA.score
+      current.scoreB = subjectB.score
+      current.scoreDiffBucket = this.diffBucket(answer.diff)
+      current.updatedAt = now
+      await this.state.storage.put(key, current)
+    }
+  }
+
   private yearOf(anime: Anime) {
     const year = Number.parseInt(String(anime.date ?? '').slice(0, 4), 10)
     return Number.isFinite(year) ? year : 0
+  }
+
+  private titleOf(anime: Anime) {
+    return anime.nameCn || anime.name || `#${anime.id}`
   }
 
   private matchesAny(anime: Anime, terms: string[]) {

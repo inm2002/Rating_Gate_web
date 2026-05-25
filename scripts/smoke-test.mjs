@@ -48,6 +48,9 @@ try {
 
   const browser = await chromium.launch({ executablePath: chromePath, headless: true })
   const page = await browser.newPage({ viewport: { width: 1366, height: 900 } })
+  await page.addInitScript(() => {
+    localStorage.setItem('rating-gate-analytics-consent-v1', 'declined')
+  })
   const errors = []
 
   page.on('console', (message) => {
@@ -242,6 +245,9 @@ try {
   const timerText = await page.locator('#metric-lives').innerText()
 
   const mobile = await browser.newPage({ viewport: { width: 390, height: 820 } })
+  await mobile.addInitScript(() => {
+    localStorage.setItem('rating-gate-analytics-consent-v1', 'declined')
+  })
   await mobile.goto(url, { waitUntil: 'networkidle' })
   await mobile.waitForSelector('#card-right img[src]')
 

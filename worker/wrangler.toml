@@ -3,7 +3,8 @@ main = "src/index.ts"
 compatibility_date = "2026-05-21"
 
 routes = [
-  { pattern = "ratinggate.cn/ws*", zone_name = "ratinggate.cn" }
+  { pattern = "ratinggate.cn/ws*", zone_name = "ratinggate.cn" },
+  { pattern = "ratinggate.cn/api/*", zone_name = "ratinggate.cn" }
 ]
 
 [[durable_objects.bindings]]

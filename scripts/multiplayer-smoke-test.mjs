@@ -51,6 +51,11 @@ try {
   const browser = await chromium.launch({ executablePath: chromePath, headless: true })
   const host = await browser.newPage({ viewport: { width: 1366, height: 900 } })
   const guest = await browser.newPage({ viewport: { width: 1366, height: 900 } })
+  for (const page of [host, guest]) {
+    await page.addInitScript(() => {
+      localStorage.setItem('rating-gate-analytics-consent-v1', 'declined')
+    })
+  }
   const errors = []
 
   for (const page of [host, guest]) {
