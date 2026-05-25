@@ -51,11 +51,19 @@ try {
   const browser = await chromium.launch({ executablePath: chromePath, headless: true })
   const host = await browser.newPage({ viewport: { width: 1366, height: 900 } })
   const guest = await browser.newPage({ viewport: { width: 1366, height: 900 } })
+  const analyticsPayloads = []
   for (const page of [host, guest]) {
-    await page.addInitScript(() => {
-      localStorage.setItem('rating-gate-analytics-consent-v1', 'declined')
+    await page.route('http://127.0.0.1:8787/api/results', async (route) => {
+      analyticsPayloads.push(JSON.parse(route.request().postData() || '{}'))
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' })
     })
   }
+  await host.addInitScript(() => {
+    localStorage.setItem('rating-gate-analytics-consent-v1', 'accepted')
+  })
+  await guest.addInitScript(() => {
+    localStorage.setItem('rating-gate-analytics-consent-v1', 'declined')
+  })
   const errors = []
 
   for (const page of [host, guest]) {
@@ -140,6 +148,9 @@ try {
   await guest.waitForSelector('#room-battle-status:text("已结束")', { timeout: 4000 })
   await host.waitForSelector('#room-result-dialog[open]')
   await guest.waitForSelector('#room-result-dialog[open]')
+  await waitFor(() => analyticsPayloads.some((payload) => payload.source === 'multiplayer'))
+  const multiplayerPayload = analyticsPayloads.find((payload) => payload.source === 'multiplayer')
+  if (!multiplayerPayload?.answers?.length) throw new Error('Multiplayer analytics did not include answers')
 
   const hostScoreRows = await host.locator('#room-battle-player-list').innerText()
   const rankText = await host.locator('#room-rank-list').innerText()
@@ -174,4 +185,22 @@ try {
 } finally {
   await viteServer.close()
   wsServer.kill()
+}
+
+function waitFor(predicate, timeout = 4000) {
+  const startedAt = Date.now()
+  return new Promise((resolve, reject) => {
+    const tick = () => {
+      if (predicate()) {
+        resolve()
+        return
+      }
+      if (Date.now() - startedAt > timeout) {
+        reject(new Error('Timed out waiting for condition'))
+        return
+      }
+      setTimeout(tick, 50)
+    }
+    tick()
+  })
 }

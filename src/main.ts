@@ -1220,8 +1220,33 @@ function renderAppView() {
   byId.viewMultiplayer.setAttribute('aria-pressed', isMultiplayer ? 'true' : 'false')
 }
 
-function switchView(nextView: AppView) {
+function resetAdminSession() {
+  byId.adminToken.value = ''
+  byId.adminDashboard.hidden = true
+  byId.adminMetrics.innerHTML = ''
+  byId.adminAccuracyBars.innerHTML = ''
+  byId.adminMediaBars.innerHTML = ''
+  byId.adminModeBars.innerHTML = ''
+  byId.adminConsentCard.innerHTML = ''
+  byId.adminPairSummary.textContent = '--'
+  byId.adminPairTable.innerHTML = ''
+  byId.adminMessage.textContent = '密钥只会用于本次请求，不会保存在浏览器里。'
+}
+
+function syncViewHash(nextView: AppView) {
+  const baseUrl = `${location.pathname}${location.search}`
+  if (nextView === 'admin') {
+    if (location.hash !== '#admin') history.replaceState(null, '', `${baseUrl}#admin`)
+    return
+  }
+  if (location.hash) history.replaceState(null, '', baseUrl)
+}
+
+function switchView(nextView: AppView, options: { syncHash?: boolean } = {}) {
+  const leavingAdmin = appView === 'admin' && nextView !== 'admin'
   appView = nextView
+  if (options.syncHash !== false) syncViewHash(nextView)
+  if (leavingAdmin) resetAdminSession()
   if (nextView === 'multiplayer') {
     stopTimer()
     if (byId.timedReadyDialog.open) byId.timedReadyDialog.close()
@@ -1313,6 +1338,7 @@ function handleRoomMessage(event: MessageEvent<string>) {
   }
   remoteGame = message.game
   captureRoomAnswerReview(remoteGame)
+  if (remoteRoom?.status === 'ended') submitRoomAnalytics(remoteRoom)
   renderRoom()
   syncRoomClock()
 }
@@ -3250,7 +3276,6 @@ function bindEvents() {
     )
   })
   byId.adminBack.addEventListener('click', () => {
-    history.replaceState(null, '', `${location.pathname}${location.search}`)
     switchView('solo')
   })
   byId.adminAuth.addEventListener('submit', (event) => {
@@ -3258,8 +3283,8 @@ function bindEvents() {
     void loadAdminAnalytics()
   })
   window.addEventListener('hashchange', () => {
-    if (location.hash === '#admin') switchView('admin')
-    else if (appView === 'admin') switchView('solo')
+    if (location.hash === '#admin') switchView('admin', { syncHash: false })
+    else if (appView === 'admin') switchView('solo', { syncHash: false })
   })
   byId.sharePreviewOpen.addEventListener('click', () => {
     if (!shareImageDataUrl) return

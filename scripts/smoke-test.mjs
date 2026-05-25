@@ -57,6 +57,26 @@ try {
     if (message.type() === 'error') errors.push(message.text())
   })
   page.on('pageerror', (error) => errors.push(error.message))
+  await page.route('http://127.0.0.1:8787/api/admin/analytics', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        generatedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        consent: { shownCount: 2, acceptedCount: 1, declinedCount: 1, updatedAt: new Date().toISOString() },
+        games: {
+          total: 1,
+          byMediaKind: { anime: 1, manga: 0, lightNovel: 0, galgame: 0 },
+          byMode: { classic: 1, timed: 0 },
+          accuracyBuckets: [0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+          distributions: [],
+        },
+        pairs: { scannedPairs: 0, totalShown: 0, totalCorrect: 0, totalWrong: 0, topPairs: [] },
+      }),
+    })
+  })
 
   await page.goto(url, { waitUntil: 'networkidle' })
   await page.waitForSelector('#card-left img[src]')
@@ -243,6 +263,20 @@ try {
   await page.locator('#timed-start').click()
   await page.waitForTimeout(1200)
   const timerText = await page.locator('#metric-lives').innerText()
+  await page.goto(`${url}#admin`, { waitUntil: 'networkidle' })
+  await page.locator('#admin-token').fill('test-admin-token')
+  await page.locator('#admin-auth button').click()
+  await page.waitForSelector('#admin-dashboard:not([hidden])')
+  await page.locator('#view-solo').click()
+  const soloHashAfterAdmin = new URL(page.url()).hash
+  await page.evaluate(() => {
+    location.hash = '#admin'
+  })
+  await page.waitForSelector('#admin-view:not([hidden])')
+  const adminTokenAfterReentry = await page.locator('#admin-token').inputValue()
+  const adminDashboardHiddenAfterReentry = await page.locator('#admin-dashboard').isHidden()
+  await page.locator('#view-multiplayer').click()
+  const multiplayerHashAfterAdmin = new URL(page.url()).hash
 
   const mobile = await browser.newPage({ viewport: { width: 390, height: 820 } })
   await mobile.addInitScript(() => {
@@ -361,6 +395,13 @@ try {
   if (timerText !== '89s') throw new Error(`Timed mode did not start after confirmation: ${timerText}`)
   if (totalBeforeSoloShortcut !== '0' || totalAfterSoloShortcut !== '1') {
     throw new Error(`Solo shortcut should answer outside inputs: ${totalBeforeSoloShortcut} -> ${totalAfterSoloShortcut}`)
+  }
+  if (soloHashAfterAdmin) throw new Error(`Solo navigation did not clear admin hash: ${soloHashAfterAdmin}`)
+  if (adminTokenAfterReentry || !adminDashboardHiddenAfterReentry) {
+    throw new Error('Admin session was still visible after leaving and re-entering admin')
+  }
+  if (multiplayerHashAfterAdmin) {
+    throw new Error(`Multiplayer navigation did not clear admin hash: ${multiplayerHashAfterAdmin}`)
   }
   if (errors.length) throw new Error(`Browser errors:\n${errors.join('\n')}`)
 
