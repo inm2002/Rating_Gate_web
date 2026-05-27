@@ -58,22 +58,55 @@ try {
   })
   page.on('pageerror', (error) => errors.push(error.message))
   await page.route('http://127.0.0.1:8787/api/admin/analytics', async (route) => {
+    const now = new Date().toISOString()
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
         ok: true,
-        generatedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        consent: { shownCount: 2, acceptedCount: 1, declinedCount: 1, updatedAt: new Date().toISOString() },
+        generatedAt: now,
+        updatedAt: now,
+        consent: { shownCount: 2, acceptedCount: 1, declinedCount: 1, updatedAt: now },
         games: {
-          total: 1,
-          byMediaKind: { anime: 1, manga: 0, lightNovel: 0, galgame: 0 },
-          byMode: { classic: 1, timed: 0 },
-          accuracyBuckets: [0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
-          distributions: [],
+          total: 90,
+          byMediaKind: { anime: 48, manga: 0, lightNovel: 0, galgame: 42 },
+          byMode: { classic: 48, timed: 42 },
+          accuracyBuckets: [0, 1, 3, 6, 10, 14, 20, 18, 12, 6],
+          distributions: [
+            {
+              mediaKind: 'anime',
+              mode: 'classic',
+              length: 5,
+              buckets: [0, 1, 2, 3, 6, 8, 11, 9, 6, 2],
+              total: 48,
+              updatedAt: now,
+            },
+            {
+              mediaKind: 'galgame',
+              mode: 'timed',
+              length: 90,
+              buckets: [0, 0, 1, 3, 4, 6, 9, 9, 7, 3],
+              total: 42,
+              updatedAt: now,
+            },
+          ],
         },
         pairs: { scannedPairs: 0, totalShown: 0, totalCorrect: 0, totalWrong: 0, topPairs: [] },
+      }),
+    })
+  })
+  await page.route('http://127.0.0.1:8787/api/analytics/benchmark**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        mediaKind: 'anime',
+        mode: 'classic',
+        length: 1,
+        buckets: [0, 1, 2, 3, 6, 8, 11, 9, 6, 2],
+        total: 48,
+        updatedAt: new Date().toISOString(),
       }),
     })
   })
@@ -267,6 +300,8 @@ try {
   await page.locator('#admin-token').fill('test-admin-token')
   await page.locator('#admin-auth button').click()
   await page.waitForSelector('#admin-dashboard:not([hidden])')
+  const adminDistributionCards = await page.locator('.admin-distribution-card').count()
+  const adminDistributionText = await page.locator('#admin-accuracy-bars').innerText()
   await page.locator('#view-solo').click()
   const soloHashAfterAdmin = new URL(page.url()).hash
   await page.evaluate(() => {
@@ -393,6 +428,9 @@ try {
     throw new Error(`Timed mode started before confirmation: ${timerBeforeStart} -> ${timerStillPaused}`)
   }
   if (timerText !== '89s') throw new Error(`Timed mode did not start after confirmation: ${timerText}`)
+  if (adminDistributionCards !== 2 || !adminDistributionText.includes('动画 · 经典') || !adminDistributionText.includes('Galgame · 限时')) {
+    throw new Error(`Admin distributions should stay separated by comparable group: ${adminDistributionText}`)
+  }
   if (totalBeforeSoloShortcut !== '0' || totalAfterSoloShortcut !== '1') {
     throw new Error(`Solo shortcut should answer outside inputs: ${totalBeforeSoloShortcut} -> ${totalAfterSoloShortcut}`)
   }

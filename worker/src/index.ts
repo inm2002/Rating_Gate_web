@@ -156,6 +156,7 @@ const adminRateBlockMs = 10 * 60 * 1000
 const adminMaxFailedAttempts = 8
 const currentYear = new Date().getFullYear()
 const mediaKinds: MediaKind[] = ['anime', 'manga', 'lightNovel', 'galgame']
+const publicBenchmarkMinSamples = 30
 const seedFiles: Record<MediaKind, string> = {
   anime: 'anime-seed.json',
   manga: 'manga-seed.json',
@@ -197,6 +198,7 @@ export default {
       !url.pathname.startsWith('/websocket') &&
       !url.pathname.startsWith('/api/results') &&
       !url.pathname.startsWith('/api/analytics/consent') &&
+      !url.pathname.startsWith('/api/analytics/benchmark') &&
       !url.pathname.startsWith('/api/admin/analytics')
     ) {
       return new Response('Not found', { status: 404 })
@@ -224,6 +226,9 @@ export class RoomHub {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: this.corsHeaders() })
     if (url.pathname.startsWith('/api/analytics/consent')) {
       return this.handleAnalyticsConsent(request)
+    }
+    if (url.pathname.startsWith('/api/analytics/benchmark')) {
+      return this.handleAnalyticsBenchmark(request)
     }
     if (url.pathname.startsWith('/api/admin/analytics')) {
       return this.handleAdminAnalytics(request)
@@ -538,6 +543,50 @@ export class RoomHub {
     return Response.json({ ok: true, ...report }, { headers: this.corsHeaders() })
   }
 
+  private async handleAnalyticsBenchmark(request: Request) {
+    if (request.method !== 'GET') {
+      return Response.json({ ok: false, error: 'method_not_allowed' }, { status: 405, headers: this.corsHeaders() })
+    }
+    const url = new URL(request.url)
+    const mediaKind = this.sanitizeMediaKind(url.searchParams.get('mediaKind'))
+    const mode = this.sanitizeMode(url.searchParams.get('mode'))
+    const stats = await this.aggregateDistributionStats(mediaKind, mode)
+    return Response.json(
+      {
+        ok: true,
+        mediaKind,
+        mode,
+        buckets:
+          stats.total >= publicBenchmarkMinSamples
+            ? stats.buckets.slice(0, 10).map((value) => Math.max(0, Number(value) || 0))
+            : Array.from({ length: 10 }, () => 0),
+        total: Math.max(0, Number(stats.total) || 0),
+        updatedAt: stats.updatedAt,
+      },
+      { headers: this.corsHeaders() },
+    )
+  }
+
+  private async aggregateDistributionStats(mediaKind: MediaKind, mode: Mode) {
+    const entries = await this.state.storage.list<DistributionStats>({
+      prefix: `analytics:distribution:${mediaKind}:${mode}:`,
+      limit: 1000,
+    })
+    const aggregate = {
+      buckets: Array.from({ length: 10 }, () => 0),
+      total: 0,
+      updatedAt: '',
+    } satisfies DistributionStats
+    for (const stats of entries.values()) {
+      stats.buckets.slice(0, 10).forEach((value, index) => {
+        aggregate.buckets[index] = (aggregate.buckets[index] ?? 0) + Math.max(0, Number(value) || 0)
+      })
+      aggregate.total += Math.max(0, Number(stats.total) || 0)
+      if (stats.updatedAt > aggregate.updatedAt) aggregate.updatedAt = stats.updatedAt
+    }
+    return aggregate
+  }
+
   private async buildAnalyticsReport() {
     const consent =
       (await this.state.storage.get<Partial<ConsentStats>>('analytics:consent:accepted')) ??
@@ -557,18 +606,28 @@ export class RoomHub {
       limit: 1000,
     })
     const pairEntries = await this.state.storage.list<PairStats>({ prefix: 'analytics:pair:', limit: 1000 })
-    const distributions = [...distributionEntries.entries()].map(([key, stats]) => {
-      const [, , mediaKind, mode, length] = key.split(':') as [string, string, MediaKind, Mode, string]
-      return {
-        key,
-        mediaKind,
-        mode,
-        length: Number(length),
-        buckets: stats.buckets,
-        total: stats.total,
-        updatedAt: stats.updatedAt,
-      }
-    })
+    const distributionGroups = new Map<string, { mediaKind: MediaKind; mode: Mode; buckets: number[]; total: number; updatedAt: string }>()
+    for (const [key, stats] of distributionEntries.entries()) {
+      const [, , mediaKind, mode] = key.split(':') as [string, string, MediaKind, Mode, string]
+      if (!mediaKinds.includes(mediaKind) || (mode !== 'classic' && mode !== 'timed')) continue
+      const groupKey = `${mediaKind}:${mode}`
+      const current =
+        distributionGroups.get(groupKey) ??
+        ({ mediaKind, mode, buckets: Array.from({ length: 10 }, () => 0), total: 0, updatedAt: '' } satisfies {
+          mediaKind: MediaKind
+          mode: Mode
+          buckets: number[]
+          total: number
+          updatedAt: string
+        })
+      stats.buckets.slice(0, 10).forEach((value, index) => {
+        current.buckets[index] = (current.buckets[index] ?? 0) + Math.max(0, Number(value) || 0)
+      })
+      current.total += Math.max(0, Number(stats.total) || 0)
+      if (stats.updatedAt > current.updatedAt) current.updatedAt = stats.updatedAt
+      distributionGroups.set(groupKey, current)
+    }
+    const distributions = [...distributionGroups.values()]
     const accuracyBuckets = Array.from({ length: 10 }, () => 0)
     const byMediaKind: Record<MediaKind, number> = { anime: 0, manga: 0, lightNovel: 0, galgame: 0 }
     const byMode: Record<Mode, number> = { classic: 0, timed: 0 }

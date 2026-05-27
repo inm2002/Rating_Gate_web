@@ -60,7 +60,7 @@ interface AnalyticsAnswer {
 interface AdminDistribution {
   mediaKind: MediaKind
   mode: Mode
-  length: number
+  length?: number
   buckets: number[]
   total: number
   updatedAt: string
@@ -104,6 +104,17 @@ interface AdminAnalyticsReport {
     totalWrong: number
     topPairs: AdminPairStats[]
   }
+}
+
+interface AnalyticsBenchmark {
+  ok: boolean
+  mediaKind: MediaKind
+  mode: Mode
+  length?: number
+  buckets: number[]
+  total: number
+  updatedAt: string
+  error?: string
 }
 
 interface SeedMeta {
@@ -186,9 +197,11 @@ const API_BASE_URL =
 const apiUrl = (path: string) => `${API_BASE_URL}${path}`
 const ANALYTICS_URL = import.meta.env.VITE_ANALYTICS_URL ?? apiUrl('/api/results')
 const ANALYTICS_CONSENT_URL = apiUrl('/api/analytics/consent')
+const ANALYTICS_BENCHMARK_URL = apiUrl('/api/analytics/benchmark')
 const ADMIN_ANALYTICS_URL = apiUrl('/api/admin/analytics')
 const ANALYTICS_CONSENT_KEY = 'rating-gate-analytics-consent-v1'
 const ANALYTICS_MAX_ANSWERS = 80
+const BENCHMARK_MIN_SAMPLES = 30
 
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('Missing #app')
@@ -204,7 +217,7 @@ const dataUpdatedAt = new Map<MediaKind, string>()
 let subjects: RatedSubject[] = []
 let pool: RatedSubject[] = []
 let seen = new Set<number>()
-let appView: AppView = 'solo'
+let appView: AppView = location.hash === '#admin' ? 'admin' : 'solo'
 let localRoom: LocalRoom | null = null
 let remoteRoom: RemoteRoom | null = null
 let remoteGame: RemoteGame | null = null
@@ -254,17 +267,17 @@ app.innerHTML = `
       </div>
       <div class="header-actions">
         <div class="view-switch" aria-label="玩法入口">
-          <button id="view-solo" type="button" aria-pressed="true">单人挑战</button>
+          <button id="view-solo" type="button" aria-pressed="${appView === 'solo' ? 'true' : 'false'}">单人挑战</button>
           <button id="view-multiplayer" type="button" aria-pressed="false">多人房间</button>
         </div>
-        <div class="mode-switch" id="solo-mode-switch" aria-label="游戏模式">
+        <div class="mode-switch" id="solo-mode-switch" aria-label="游戏模式"${appView === 'solo' ? '' : ' hidden'}>
           <button id="mode-classic" type="button" aria-pressed="true">经典</button>
           <button id="mode-timed" type="button" aria-pressed="false">限时</button>
         </div>
       </div>
     </header>
 
-    <div class="game-layout" id="solo-view">
+    <div class="game-layout" id="solo-view"${appView === 'solo' ? '' : ' hidden'}>
       <section class="stage" aria-live="polite">
         <div class="stage-head">
           <div>
@@ -670,7 +683,7 @@ app.innerHTML = `
       </div>
     </section>
 
-    <section class="admin-view" id="admin-view" hidden>
+    <section class="admin-view" id="admin-view"${appView === 'admin' ? '' : ' hidden'}>
       <div class="admin-hero">
         <div>
           <p class="eyebrow">数据后台</p>
@@ -696,8 +709,8 @@ app.innerHTML = `
         <section class="admin-grid">
           <article class="admin-card admin-card-wide admin-card-histogram">
             <div class="panel-title compact-title">
-              <h3>正确率直方图</h3>
-              <span>柱状为局数，曲线为趋势</span>
+              <h3>同条件正确率分布</h3>
+              <span>按题库、模式和比赛长度分别统计</span>
             </div>
             <div class="admin-bars" id="admin-accuracy-bars"></div>
           </article>
@@ -839,6 +852,13 @@ app.innerHTML = `
               <img id="share-preview" alt="Rating;Gate 分享战绩图预览" />
             </button>
           </section>
+          <section class="level-panel" aria-label="同条件水平对比">
+            <div class="panel-title compact-title">
+              <h3>同条件水平对比</h3>
+              <span id="level-summary">正在读取匿名统计...</span>
+            </div>
+            <div class="level-chart" id="level-chart"></div>
+          </section>
         </div>
       </section>
       <div class="dialog-actions result-actions">
@@ -913,6 +933,8 @@ const byId = {
   reviewBiggestMiss: $('review-biggest-miss'),
   reviewBiggestMissDetail: $('review-biggest-miss-detail'),
   reviewAverageDiff: $('review-average-diff'),
+  levelSummary: $('level-summary'),
+  levelChart: $('level-chart'),
   accuracyRing: $('accuracy-ring'),
   accuracyRingValue: $('accuracy-ring-value'),
   sharePreview: $('share-preview') as HTMLImageElement,
@@ -2632,6 +2654,52 @@ function renderReview(reason: string) {
   byId.sharePreviewLarge.src = shareImageDataUrl
 }
 
+function accuracyBucket(correct: number, total: number) {
+  if (total <= 0) return 0
+  return Math.min(9, Math.max(0, Math.floor((correct / total) * 10)))
+}
+
+function renderLevelPlaceholder(message: string) {
+  byId.levelSummary.textContent = message
+  byId.levelChart.innerHTML = `<p class="level-empty">${escapeHtml(message)}</p>`
+}
+
+async function loadResultBenchmark() {
+  const mediaKind = settings.mediaKind
+  const resultMode = mode
+  const bucket = accuracyBucket(stats.correct, stats.total)
+  const label = `${mediaLabels[mediaKind]} · ${modeLabel(resultMode)}`
+  renderLevelPlaceholder(`正在读取 ${label} 的同条件统计...`)
+  try {
+    const params = new URLSearchParams({ mediaKind, mode: resultMode })
+    const response = await fetch(`${ANALYTICS_BENCHMARK_URL}?${params.toString()}`, { cache: 'no-store' })
+    const data = (await response.json()) as AnalyticsBenchmark
+    if (!response.ok || !data.ok) throw new Error(data.error || 'benchmark_failed')
+    if (data.total < BENCHMARK_MIN_SAMPLES) {
+      renderLevelPlaceholder(`同题库、同模式样本不足 ${BENCHMARK_MIN_SAMPLES} 局，暂时无法判断水平。`)
+      return
+    }
+    const lowerCount = data.buckets.slice(0, bucket).reduce((sum, value) => sum + value, 0)
+    const percentile = Math.round((lowerCount / Math.max(1, data.total)) * 100)
+    const bucketLabel = ['0-9%', '10-19%', '20-29%', '30-39%', '40-49%', '50-59%', '60-69%', '70-79%', '80-89%', '90-100%'][bucket]
+    byId.levelSummary.textContent = `${label} · ${data.total} 局匿名样本`
+    byId.levelChart.innerHTML = `
+      <div class="level-copy">
+        <strong>你处于 ${bucketLabel} 正确率区间</strong>
+        <span>和同题库、同模式的玩家相比，你大约超过了 ${percentile}% 的样本。</span>
+      </div>
+      ${renderAccuracyHistogram(data.buckets, {
+        markerBucket: bucket,
+        markerText: `你在 ${bucketLabel}`,
+        compact: false,
+      })}
+      <p class="level-note">这个结果来自匿名游玩样本，只作为轻松参考；经典模式每局题数不同，短局成绩会更容易波动。</p>
+    `
+  } catch {
+    renderLevelPlaceholder('暂时无法读取同条件统计，不影响本局复盘和战绩分享。')
+  }
+}
+
 function endGame(reason: string) {
   if (phase === 'ended') return
   stopTimer()
@@ -2647,6 +2715,7 @@ function endGame(reason: string) {
   $('result-accuracy').textContent = `${accuracy}%`
   $('diff-bars').innerHTML = renderDiffBars()
   renderReview(reason)
+  void loadResultBenchmark()
   submitSoloAnalytics(reason)
   render()
   byId.resultDialog.showModal()
@@ -2929,24 +2998,98 @@ function renderAdminBars(
     .join('')
 }
 
+function renderHistogramSummary(buckets: number[], total: number) {
+  const accuracyLabels = ['0-9%', '10-19%', '20-29%', '30-39%', '40-49%', '50-59%', '60-69%', '70-79%', '80-89%', '90-100%']
+  return `
+    <div class="histogram-summary">
+      ${accuracyLabels
+        .map((label, index) => {
+          const value = buckets[index] ?? 0
+          return `<span><b>${label}</b>${value} 局 · ${percent(value, total)}%</span>`
+        })
+        .join('')}
+    </div>
+  `
+}
+
+function renderAdminDistributions(distributions: AdminDistribution[]) {
+  if (distributions.length === 0) {
+    return '<p class="empty-state">还没有可展示的正确率分布。</p>'
+  }
+  return distributions
+    .slice()
+    .sort((a, b) => b.total - a.total || b.updatedAt.localeCompare(a.updatedAt))
+    .map((distribution) => {
+      const title = `${mediaLabels[distribution.mediaKind]} · ${modeLabel(distribution.mode)}`
+      return `
+        <article class="admin-distribution-card">
+          <div class="panel-title compact-title">
+            <h4>${escapeHtml(title)}</h4>
+            <span>${distribution.total} 局 · 更新 ${formatDateTime(distribution.updatedAt)}</span>
+          </div>
+          ${renderAccuracyHistogram(distribution.buckets)}
+          ${renderHistogramSummary(distribution.buckets, distribution.total)}
+        </article>
+      `
+    })
+    .join('')
+}
+
 function smoothSvgPath(points: { x: number; y: number }[]) {
   if (points.length === 0) return ''
   if (points.length === 1) return `M ${points[0].x} ${points[0].y}`
   return points
     .map((point, index) => {
       if (index === 0) return `M ${point.x} ${point.y}`
+      const previousPrevious = points[Math.max(0, index - 2)]
       const previous = points[index - 1]
-      const controlOffset = (point.x - previous.x) / 2
-      return `C ${previous.x + controlOffset} ${previous.y}, ${point.x - controlOffset} ${point.y}, ${point.x} ${point.y}`
+      const next = points[Math.min(points.length - 1, index + 1)]
+      const control1 = {
+        x: previous.x + (point.x - previousPrevious.x) / 6,
+        y: previous.y + (point.y - previousPrevious.y) / 6,
+      }
+      const control2 = {
+        x: point.x - (next.x - previous.x) / 6,
+        y: point.y - (next.y - previous.y) / 6,
+      }
+      return `C ${control1.x.toFixed(1)} ${control1.y.toFixed(1)}, ${control2.x.toFixed(1)} ${control2.y.toFixed(1)}, ${point.x} ${point.y}`
     })
     .join(' ')
 }
 
-function renderAccuracyHistogram(values: number[]) {
+function smoothDistributionSamples(values: number[], sampleCount = 96) {
+  const bandwidth = 1.15
+  return Array.from({ length: sampleCount }, (_, index) => {
+    const position = (index / Math.max(1, sampleCount - 1)) * (values.length - 1)
+    let weighted = 0
+    let weightTotal = 0
+    values.forEach((value, bucketIndex) => {
+      const distance = (position - bucketIndex) / bandwidth
+      const weight = Math.exp(-0.5 * distance * distance)
+      weighted += value * weight
+      weightTotal += weight
+    })
+    return weightTotal > 0 ? weighted / weightTotal : 0
+  })
+}
+
+function modeLabel(value: Mode) {
+  return value === 'classic' ? '经典' : '限时'
+}
+
+function renderAccuracyHistogram(
+  values: number[],
+  options: { markerBucket?: number; markerText?: string; compact?: boolean } = {},
+) {
   const labels = ['0-9', '10-19', '20-29', '30-39', '40-49', '50-59', '60-69', '70-79', '80-89', '90-100']
   const width = 760
-  const height = 360
-  const chart = { left: 58, top: 28, right: 22, bottom: 54 }
+  const markerBucket =
+    typeof options.markerBucket === 'number' && options.markerBucket >= 0 && options.markerBucket < values.length
+      ? options.markerBucket
+      : null
+  const hasMarker = markerBucket !== null
+  const height = options.compact ? (hasMarker ? 344 : 300) : hasMarker ? 414 : 360
+  const chart = { left: 58, top: hasMarker ? 74 : 28, right: 22, bottom: 54 }
   const plotWidth = width - chart.left - chart.right
   const plotHeight = height - chart.top - chart.bottom
   const maxValue = Math.max(...values, 1)
@@ -2957,18 +3100,17 @@ function renderAccuracyHistogram(values: number[]) {
   const barWidth = plotWidth / values.length - barGap
   const peak = Math.max(...values, 0)
   const ticks = Array.from({ length: 5 }, (_, index) => Math.round((maxValue / 4) * index))
-  const smoothed = values.map((value, index) => {
-    const previous = values[index - 1] ?? value
-    const next = values[index + 1] ?? value
-    return (previous + value * 2 + next) / 4
-  })
-  const densityPoints = smoothed.map((value, index) => {
-    const x = chart.left + index * (plotWidth / values.length) + barWidth / 2 + barGap / 2
-    const y = chart.top + plotHeight - (value / maxValue) * plotHeight
+  const smoothSamples = shouldShowTrend ? smoothDistributionSamples(values) : []
+  const smoothMax = Math.max(maxValue, ...smoothSamples, 1)
+  const densityPoints = smoothSamples.map((value, index) => {
+    const x = chart.left + (index / Math.max(1, smoothSamples.length - 1)) * plotWidth
+    const y = chart.top + plotHeight - (value / smoothMax) * plotHeight
     return { x: Number(x.toFixed(1)), y: Number(y.toFixed(1)) }
   })
   const densityPath = smoothSvgPath(densityPoints)
-  const areaPath = `${densityPath} L ${densityPoints[densityPoints.length - 1]?.x ?? chart.left} ${chart.top + plotHeight} L ${densityPoints[0]?.x ?? chart.left} ${chart.top + plotHeight} Z`
+  const areaPath = densityPath
+    ? `${densityPath} L ${densityPoints[densityPoints.length - 1]?.x ?? chart.left} ${chart.top + plotHeight} L ${densityPoints[0]?.x ?? chart.left} ${chart.top + plotHeight} Z`
+    : ''
   const axisBottom = chart.top + plotHeight
   const bars = values
     .map((value, index) => {
@@ -2985,6 +3127,25 @@ function renderAccuracyHistogram(values: number[]) {
       `
     })
     .join('')
+  const marker = markerBucket === null
+    ? ''
+    : (() => {
+        const bucketCenter = chart.left + markerBucket * (plotWidth / values.length) + (plotWidth / values.length) / 2
+        const bubbleWidth = 142
+        const bubbleX = Math.min(width - chart.right - bubbleWidth, Math.max(chart.left, bucketCenter - bubbleWidth / 2))
+        const bubbleY = 14
+        const arrowBaseY = bubbleY + 34
+        const arrowTipY = chart.top - 10
+        const text = escapeHtml(options.markerText ?? '你在这里')
+        return `
+          <line x1="${bucketCenter.toFixed(1)}" x2="${bucketCenter.toFixed(1)}" y1="${chart.top}" y2="${axisBottom}" class="chart-marker-line" />
+          <g>
+            <rect x="${bubbleX.toFixed(1)}" y="${bubbleY}" width="${bubbleWidth}" height="34" rx="10" class="chart-marker-bubble" />
+            <path d="M ${(bucketCenter - 7).toFixed(1)} ${arrowBaseY} L ${bucketCenter.toFixed(1)} ${arrowTipY} L ${(bucketCenter + 7).toFixed(1)} ${arrowBaseY} Z" class="chart-marker-bubble" />
+            <text x="${(bubbleX + bubbleWidth / 2).toFixed(1)}" y="${bubbleY + 22}" class="chart-marker-text">${text}</text>
+          </g>
+        `
+      })()
   const grid = ticks
     .map((tick) => {
       const y = axisBottom - (tick / maxValue) * plotHeight
@@ -3002,10 +3163,12 @@ function renderAccuracyHistogram(values: number[]) {
         ${grid}
         <line x1="${chart.left}" x2="${chart.left}" y1="${chart.top}" y2="${axisBottom}" class="chart-axis" />
         <line x1="${chart.left}" x2="${width - chart.right}" y1="${axisBottom}" y2="${axisBottom}" class="chart-axis" />
+        ${shouldShowTrend ? `<path d="${areaPath}" class="density-area" />` : ''}
         ${bars}
-        ${shouldShowTrend ? `<path d="${areaPath}" class="density-area" /><path d="${densityPath}" class="density-line" />` : ''}
+        ${shouldShowTrend ? `<path d="${densityPath}" class="density-line" />` : ''}
+        ${marker}
         <text x="${chart.left}" y="${height - 10}" class="chart-axis-title">正确率区间（%）</text>
-        <text x="18" y="${chart.top + 4}" class="chart-axis-title chart-axis-title-y">局数</text>
+        <text x="18" y="${(chart.top + plotHeight / 2).toFixed(1)}" class="chart-axis-title chart-axis-title-y" transform="rotate(-90 18 ${(chart.top + plotHeight / 2).toFixed(1)})">局数</text>
       </svg>
       <div class="chart-legend">
         <span><i class="legend-bar"></i>完成局数</span>
@@ -3044,18 +3207,7 @@ function renderAdminReport(report: AdminAnalyticsReport) {
     )
     .join('')
 
-  const accuracyLabels = ['0-9%', '10-19%', '20-29%', '30-39%', '40-49%', '50-59%', '60-69%', '70-79%', '80-89%', '90-100%']
-  byId.adminAccuracyBars.innerHTML = `
-    ${renderAccuracyHistogram(report.games.accuracyBuckets)}
-    <div class="histogram-summary">
-      ${accuracyLabels
-        .map((label, index) => {
-          const value = report.games.accuracyBuckets[index] ?? 0
-          return `<span><b>${label}</b>${value} 局 · ${percent(value, gameTotal)}%</span>`
-        })
-        .join('')}
-    </div>
-  `
+  byId.adminAccuracyBars.innerHTML = renderAdminDistributions(report.games.distributions)
   byId.adminMediaBars.innerHTML = renderAdminBars(
     (Object.keys(report.games.byMediaKind) as MediaKind[]).map((kind) => ({
       label: mediaLabels[kind],
