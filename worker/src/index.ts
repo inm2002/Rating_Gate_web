@@ -57,6 +57,12 @@ interface AdminRateStats {
   updatedAt: string
 }
 
+interface PublicRateStats {
+  count: number
+  resetAt: number
+  blockedUntil: number
+}
+
 interface PairStats {
   mediaKind: MediaKind
   mode: Mode
@@ -154,9 +160,17 @@ const maxPlayers = 8
 const adminRateWindowMs = 10 * 60 * 1000
 const adminRateBlockMs = 10 * 60 * 1000
 const adminMaxFailedAttempts = 8
+const publicRateWindowMs = 60 * 1000
+const publicRateBlockMs = 60 * 1000
+const publicRateLimits = {
+  results: 40,
+  consent: 30,
+  benchmark: 120,
+} as const
 const currentYear = new Date().getFullYear()
 const mediaKinds: MediaKind[] = ['anime', 'manga', 'lightNovel', 'galgame']
 const publicBenchmarkMinSamples = 30
+const benchmarkCacheTtlMs = 2 * 60 * 1000
 const seedFiles: Record<MediaKind, string> = {
   anime: 'anime-seed.json',
   manga: 'manga-seed.json',
@@ -215,6 +229,8 @@ export class RoomHub {
   private clients = new Map<WebSocket, { roomCode: string; playerId: string }>()
   private allSubjects = new Map<MediaKind, Anime[]>()
   private seedPromise: Promise<Map<MediaKind, Anime[]>> | null = null
+  private publicRate = new Map<string, PublicRateStats>()
+  private benchmarkCache = new Map<string, { expiresAt: number; stats: DistributionStats }>()
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
@@ -266,6 +282,13 @@ export class RoomHub {
       'access-control-allow-methods': 'GET, POST, OPTIONS',
       'access-control-allow-headers': 'authorization, content-type',
       'cache-control': 'no-store',
+    }
+  }
+
+  private apiHeaders(cacheControl = 'no-store') {
+    return {
+      ...this.corsHeaders(),
+      'cache-control': cacheControl,
     }
   }
 
@@ -426,8 +449,10 @@ export class RoomHub {
 
   private async handleAnalyticsConsent(request: Request) {
     if (request.method !== 'POST') {
-      return Response.json({ ok: false, error: 'method_not_allowed' }, { status: 405, headers: this.corsHeaders() })
+      return Response.json({ ok: false, error: 'method_not_allowed' }, { status: 405, headers: this.apiHeaders() })
     }
+    const limited = await this.checkPublicRateLimit(request, 'consent')
+    if (limited) return limited
     let event: 'shown' | 'accepted' | 'declined' = 'accepted'
     try {
       const payload = (await request.json()) as { event?: string }
@@ -448,7 +473,7 @@ export class RoomHub {
     if (event === 'declined') current.declinedCount += 1
     current.updatedAt = new Date().toISOString()
     await this.state.storage.put(key, current)
-    return Response.json({ ok: true, event }, { headers: this.corsHeaders() })
+    return Response.json({ ok: true, event }, { headers: this.apiHeaders() })
   }
 
   private adminTokenFrom(request: Request) {
@@ -482,6 +507,52 @@ export class RoomHub {
     return `admin:rate:${hex}`
   }
 
+  private async publicRateKey(request: Request, scope: string) {
+    const data = new TextEncoder().encode(`${scope}|${this.adminClientFingerprint(request)}`)
+    const digest = await crypto.subtle.digest('SHA-256', data)
+    const hex = [...new Uint8Array(digest)]
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('')
+      .slice(0, 32)
+    return `public:${hex}`
+  }
+
+  private prunePublicRate(now: number) {
+    if (this.publicRate.size < 5000) return
+    for (const [key, stats] of this.publicRate.entries()) {
+      if (stats.resetAt <= now && stats.blockedUntil <= now) this.publicRate.delete(key)
+    }
+  }
+
+  private async checkPublicRateLimit(request: Request, scope: keyof typeof publicRateLimits) {
+    const now = Date.now()
+    this.prunePublicRate(now)
+    const key = await this.publicRateKey(request, scope)
+    const current = this.publicRate.get(key)
+    if (current && current.blockedUntil > now) {
+      const retryAfter = Math.max(1, Math.ceil((current.blockedUntil - now) / 1000))
+      return Response.json(
+        { ok: false, error: 'rate_limited', retryAfter },
+        { status: 429, headers: { ...this.apiHeaders(), 'retry-after': String(retryAfter) } },
+      )
+    }
+    const stats =
+      current && current.resetAt > now
+        ? current
+        : ({ count: 0, resetAt: now + publicRateWindowMs, blockedUntil: 0 } satisfies PublicRateStats)
+    stats.count += 1
+    if (stats.count > publicRateLimits[scope]) stats.blockedUntil = now + publicRateBlockMs
+    this.publicRate.set(key, stats)
+    if (stats.blockedUntil > now) {
+      const retryAfter = Math.ceil((stats.blockedUntil - now) / 1000)
+      return Response.json(
+        { ok: false, error: 'rate_limited', retryAfter },
+        { status: 429, headers: { ...this.apiHeaders(), 'retry-after': String(retryAfter) } },
+      )
+    }
+    return null
+  }
+
   private async checkAdminRateLimit(request: Request) {
     const key = await this.adminRateKey(request)
     const stats = await this.state.storage.get<AdminRateStats>(key)
@@ -491,7 +562,7 @@ export class RoomHub {
       const retryAfter = Math.max(1, Math.ceil((stats.blockedUntil - now) / 1000))
       return Response.json(
         { ok: false, error: 'too_many_attempts', retryAfter },
-        { status: 429, headers: { ...this.corsHeaders(), 'retry-after': String(retryAfter) } },
+        { status: 429, headers: { ...this.apiHeaders(), 'retry-after': String(retryAfter) } },
       )
     }
     if (stats.resetAt <= now) await this.state.storage.delete(key)
@@ -514,10 +585,10 @@ export class RoomHub {
       const retryAfter = Math.ceil((stats.blockedUntil - now) / 1000)
       return Response.json(
         { ok: false, error: 'too_many_attempts', retryAfter },
-        { status: 429, headers: { ...this.corsHeaders(), 'retry-after': String(retryAfter) } },
+        { status: 429, headers: { ...this.apiHeaders(), 'retry-after': String(retryAfter) } },
       )
     }
-    return Response.json({ ok: false, error: 'unauthorized' }, { status: 401, headers: this.corsHeaders() })
+    return Response.json({ ok: false, error: 'unauthorized' }, { status: 401, headers: this.apiHeaders() })
   }
 
   private async clearAdminRateLimit(request: Request) {
@@ -526,11 +597,11 @@ export class RoomHub {
 
   private async handleAdminAnalytics(request: Request) {
     if (request.method !== 'GET') {
-      return Response.json({ ok: false, error: 'method_not_allowed' }, { status: 405, headers: this.corsHeaders() })
+      return Response.json({ ok: false, error: 'method_not_allowed' }, { status: 405, headers: this.apiHeaders() })
     }
     const expected = this.env.ADMIN_TOKEN?.trim()
     if (!expected) {
-      return Response.json({ ok: false, error: 'admin_not_configured' }, { status: 404, headers: this.corsHeaders() })
+      return Response.json({ ok: false, error: 'admin_not_configured' }, { status: 404, headers: this.apiHeaders() })
     }
     const limited = await this.checkAdminRateLimit(request)
     if (limited) return limited
@@ -540,13 +611,15 @@ export class RoomHub {
     await this.clearAdminRateLimit(request)
     await this.loadSubjectSeeds(request)
     const report = await this.buildAnalyticsReport()
-    return Response.json({ ok: true, ...report }, { headers: this.corsHeaders() })
+    return Response.json({ ok: true, ...report }, { headers: this.apiHeaders() })
   }
 
   private async handleAnalyticsBenchmark(request: Request) {
     if (request.method !== 'GET') {
-      return Response.json({ ok: false, error: 'method_not_allowed' }, { status: 405, headers: this.corsHeaders() })
+      return Response.json({ ok: false, error: 'method_not_allowed' }, { status: 405, headers: this.apiHeaders() })
     }
+    const limited = await this.checkPublicRateLimit(request, 'benchmark')
+    if (limited) return limited
     const url = new URL(request.url)
     const mediaKind = this.sanitizeMediaKind(url.searchParams.get('mediaKind'))
     const mode = this.sanitizeMode(url.searchParams.get('mode'))
@@ -563,11 +636,15 @@ export class RoomHub {
         total: Math.max(0, Number(stats.total) || 0),
         updatedAt: stats.updatedAt,
       },
-      { headers: this.corsHeaders() },
+      { headers: this.apiHeaders('public, max-age=60, s-maxage=120') },
     )
   }
 
   private async aggregateDistributionStats(mediaKind: MediaKind, mode: Mode) {
+    const cacheKey = `${mediaKind}:${mode}`
+    const cached = this.benchmarkCache.get(cacheKey)
+    const now = Date.now()
+    if (cached && cached.expiresAt > now) return cached.stats
     const entries = await this.state.storage.list<DistributionStats>({
       prefix: `analytics:distribution:${mediaKind}:${mode}:`,
       limit: 1000,
@@ -584,6 +661,7 @@ export class RoomHub {
       aggregate.total += Math.max(0, Number(stats.total) || 0)
       if (stats.updatedAt > aggregate.updatedAt) aggregate.updatedAt = stats.updatedAt
     }
+    this.benchmarkCache.set(cacheKey, { expiresAt: now + benchmarkCacheTtlMs, stats: aggregate })
     return aggregate
   }
 
@@ -701,18 +779,20 @@ export class RoomHub {
 
   private async handleAnalyticsResult(request: Request) {
     if (request.method !== 'POST') {
-      return Response.json({ ok: false, error: 'method_not_allowed' }, { status: 405, headers: this.corsHeaders() })
+      return Response.json({ ok: false, error: 'method_not_allowed' }, { status: 405, headers: this.apiHeaders() })
     }
+    const limited = await this.checkPublicRateLimit(request, 'results')
+    if (limited) return limited
     const contentLength = Number.parseInt(request.headers.get('content-length') ?? '0', 10)
     if (Number.isFinite(contentLength) && contentLength > 24000) {
-      return Response.json({ ok: false, error: 'payload_too_large' }, { status: 413, headers: this.corsHeaders() })
+      return Response.json({ ok: false, error: 'payload_too_large' }, { status: 413, headers: this.apiHeaders() })
     }
 
     let payload: AnalyticsPayload
     try {
       payload = (await request.json()) as AnalyticsPayload
     } catch {
-      return Response.json({ ok: false, error: 'invalid_json' }, { status: 400, headers: this.corsHeaders() })
+      return Response.json({ ok: false, error: 'invalid_json' }, { status: 400, headers: this.apiHeaders() })
     }
 
     const mediaKind = this.sanitizeMediaKind(payload.mediaKind)
@@ -721,10 +801,10 @@ export class RoomHub {
     const answers = Array.isArray(payload.answers) ? payload.answers.slice(0, 80) : []
     const gameId = String(payload.gameId ?? '').trim().slice(0, 80)
     if (!gameId || answers.length === 0) {
-      return Response.json({ ok: false, error: 'missing_game' }, { status: 400, headers: this.corsHeaders() })
+      return Response.json({ ok: false, error: 'missing_game' }, { status: 400, headers: this.apiHeaders() })
     }
     if (await this.isDuplicateGame(gameId)) {
-      return Response.json({ ok: true, duplicate: true }, { headers: this.corsHeaders() })
+      return Response.json({ ok: true, duplicate: true }, { headers: this.apiHeaders() })
     }
 
     const subjects = this.analyticsSubjectMap(mediaKind)
@@ -732,7 +812,7 @@ export class RoomHub {
       .map((answer) => this.normalizeAnalyticsAnswer(answer, subjects))
       .filter((answer): answer is NonNullable<ReturnType<typeof this.normalizeAnalyticsAnswer>> => Boolean(answer))
     if (validAnswers.length === 0) {
-      return Response.json({ ok: false, error: 'no_valid_answers' }, { status: 400, headers: this.corsHeaders() })
+      return Response.json({ ok: false, error: 'no_valid_answers' }, { status: 400, headers: this.apiHeaders() })
     }
 
     const correct = validAnswers.filter((answer) => answer.correct).length
@@ -745,7 +825,7 @@ export class RoomHub {
         correct,
         distributionKey: `analytics:distribution:${mediaKind}:${mode}:${length}`,
       },
-      { headers: this.corsHeaders() },
+      { headers: this.apiHeaders() },
     )
   }
 
@@ -783,6 +863,7 @@ export class RoomHub {
     current.total += 1
     current.updatedAt = new Date().toISOString()
     await this.state.storage.put(key, current)
+    this.benchmarkCache.delete(`${mediaKind}:${mode}`)
   }
 
   private async updatePairStats(

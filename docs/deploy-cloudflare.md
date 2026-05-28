@@ -28,6 +28,104 @@ example.com
 - 不维护服务器端持久排行榜，只在当局结算时广播房间内排名。
 - 经典模式只在玩家作答、结算、进入下一题等状态变化时广播。
 - 限时模式只在玩家作答和比赛结束时广播。
+- Pages 静态资源通过 `_headers` 设置缓存头，题库 JSON 按每周更新节奏缓存，哈希资源长期缓存。
+- 赛后水平对比接口 `/api/analytics/benchmark` 使用短缓存和 Durable Object 内存缓存，减少重复读取聚合统计。
+- 公开统计接口带有轻量限流，避免异常脚本反复写入或读取统计接口。
+
+## 缓存与安全规则
+
+Rating;Gate 是开源项目，接口路径和数据结构不应被视为秘密。生产部署应把安全边界放在 Worker 鉴权、服务端校验、限流和 Cloudflare 边缘规则上。
+
+### Cache Rules
+
+建议在 Cloudflare 控制台进入 **Rules** -> **Cache Rules**，添加静态资源缓存规则。若 Pages 已正确发布 `public/_headers`，这些规则可以作为边缘层补充。
+
+推荐规则：
+
+```text
+Rule name: Rating;Gate static seeds
+When incoming requests match:
+  (http.host eq "<站点域名>" and http.request.uri.path matches "^/(anime|manga|light-novel|galgame)-seed\\.json$")
+Then:
+  Eligible for cache
+  Edge TTL: 7 days
+  Browser TTL: Respect origin
+```
+
+```text
+Rule name: Rating;Gate built assets
+When incoming requests match:
+  (http.host eq "<站点域名>" and starts_with(http.request.uri.path, "/assets/"))
+Then:
+  Eligible for cache
+  Edge TTL: 1 year
+  Browser TTL: Respect origin
+```
+
+`/` 和 `/index.html` 不建议长缓存，以免部署后用户继续拿到旧入口文件。
+
+### WAF Custom Rules
+
+建议在 **Security** -> **WAF** -> **Custom rules** 添加低误伤规则。规则目标是减少扫描和异常请求，不应影响正常浏览器玩家。
+
+扫描路径阻断：
+
+```text
+Rule name: Rating;Gate block common scanners
+Expression:
+  (http.host eq "<站点域名>" and
+   (starts_with(http.request.uri.path, "/wp-") or
+    starts_with(http.request.uri.path, "/Public/") or
+    starts_with(http.request.uri.path, "/.env") or
+    starts_with(http.request.uri.path, "/config/") or
+    http.request.uri.path eq "/index/login" or
+    http.request.uri.path eq "/admin.php"))
+Action:
+  Block
+```
+
+异常空 User-Agent 挑战：
+
+```text
+Rule name: Rating;Gate challenge empty user agents
+Expression:
+  (http.host eq "<站点域名>" and
+   http.user_agent eq "" and
+   (http.request.uri.path eq "/" or
+    http.request.uri.path matches "^/(anime|manga|light-novel|galgame)-seed\\.json$" or
+    starts_with(http.request.uri.path, "/api/analytics/benchmark") or
+    starts_with(http.request.uri.path, "/api/admin/analytics")))
+Action:
+  Managed Challenge
+```
+
+不要对所有中国大陆访问或所有移动端访问设置挑战；这会伤害正常用户体验。
+
+### Rate Limiting Rules
+
+Worker 已经包含轻量限流。若站点出现大量异常请求，可以在 Cloudflare 边缘增加保守的限速规则：
+
+```text
+Rule name: Rating;Gate protect analytics writes
+Path:
+  /api/results
+Threshold:
+  60 requests per minute per IP
+Action:
+  Managed Challenge or Block for 1 minute
+```
+
+```text
+Rule name: Rating;Gate protect admin analytics
+Path:
+  /api/admin/analytics
+Threshold:
+  20 requests per 10 minutes per IP
+Action:
+  Block for 10 minutes
+```
+
+边缘限速阈值应高于正常使用量，避免多人同一网络下误伤。
 
 ## 新部署
 
