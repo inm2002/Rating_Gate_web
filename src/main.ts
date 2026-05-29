@@ -3293,21 +3293,27 @@ async function loadAdminAnalytics() {
       cache: 'no-store',
     })
     const responseText = await response.text()
-    let data: (AdminAnalyticsReport & { error?: string }) | null = null
+    let data: (AdminAnalyticsReport & { error?: string; retryAfter?: number }) | null = null
     try {
-      data = JSON.parse(responseText) as AdminAnalyticsReport & { error?: string }
+      data = JSON.parse(responseText) as AdminAnalyticsReport & { error?: string; retryAfter?: number }
     } catch {
       data = null
     }
     if (!response.ok || !data || !data.ok) {
+      const retryText =
+        data?.retryAfter && Number.isFinite(Number(data.retryAfter))
+          ? `，约 ${Math.max(1, Math.ceil(Number(data.retryAfter)))} 秒后再试`
+          : ''
       byId.adminMessage.textContent =
-        response.status === 429
-          ? '请求过于频繁，请稍等几秒后再试。'
+        data?.error === 'too_many_attempts'
+          ? `密钥错误次数过多，请稍后再试${retryText}。`
+          : response.status === 429
+            ? '请求过于频繁，请稍等几秒后再试。'
           : data?.error === 'unauthorized'
-          ? '密钥不正确，无法读取后台数据。'
-          : data?.error === 'admin_not_configured'
-            ? '后台密钥还没有在 Cloudflare Worker Secret 中配置。'
-            : '后台数据读取失败，请稍后再试。'
+            ? '密钥不正确，无法读取后台数据。'
+            : data?.error === 'admin_not_configured'
+              ? '后台密钥还没有在 Cloudflare Worker Secret 中配置。'
+              : '后台数据读取失败，请稍后再试。'
       return
     }
     renderAdminReport(data)

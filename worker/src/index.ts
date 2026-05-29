@@ -662,15 +662,16 @@ export class RoomHub {
     if (!expected) {
       return Response.json({ ok: false, error: 'admin_not_configured' }, { status: 404, headers: this.apiHeaders() })
     }
+    const actual = this.adminTokenFrom(request)
+    if (this.adminTokenMatches(actual, expected)) {
+      await this.clearAdminRateLimit(request)
+      await this.loadSubjectSeeds(request)
+      const report = await this.buildAnalyticsReport()
+      return Response.json({ ok: true, ...report }, { headers: this.apiHeaders() })
+    }
     const limited = await this.checkAdminRateLimit(request)
     if (limited) return limited
-    if (!this.adminTokenMatches(this.adminTokenFrom(request), expected)) {
-      return this.recordAdminFailure(request)
-    }
-    await this.clearAdminRateLimit(request)
-    await this.loadSubjectSeeds(request)
-    const report = await this.buildAnalyticsReport()
-    return Response.json({ ok: true, ...report }, { headers: this.apiHeaders() })
+    return this.recordAdminFailure(request)
   }
 
   private async handleAnalyticsBenchmark(request: Request) {
