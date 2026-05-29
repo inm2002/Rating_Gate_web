@@ -6,6 +6,10 @@ const port = 5174
 const wsPort = 8790
 const url = `http://127.0.0.1:${port}/`
 const chromePath = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+const testCoverPng = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+  'base64',
+)
 
 process.env.VITE_WS_URL = `ws://127.0.0.1:${wsPort}`
 
@@ -109,6 +113,12 @@ try {
         updatedAt: new Date().toISOString(),
       }),
     })
+  })
+  await page.route('https://lain.bgm.tv/**', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'image/png', body: testCoverPng })
+  })
+  await page.route('http://127.0.0.1:8787/api/cover**', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'image/png', body: testCoverPng })
   })
 
   await page.goto(url, { waitUntil: 'networkidle' })

@@ -177,6 +177,8 @@ const seedFiles: Record<MediaKind, string> = {
   lightNovel: 'light-novel-seed.json',
   galgame: 'galgame-seed.json',
 }
+const coverCacheTtl = 60 * 60 * 24 * 30
+const coverHosts = new Set(['lain.bgm.tv', 'bgm.tv', 'bangumi.tv', 'chii.in'])
 const presetExcludeDefaults: ExcludeKey[] = ['guochan', 'movies', 'oumei', 'recap']
 const tagFilterKeys: MediaTagFilterKey[] = [
   'mangaShort',
@@ -207,6 +209,9 @@ const tagFilterTerms: Partial<Record<MediaTagFilterKey, string[]>> = {
 export default {
   async fetch(request: Request, env: Env) {
     const url = new URL(request.url)
+    if (url.pathname.startsWith('/api/cover')) {
+      return handleCoverProxy(request)
+    }
     if (
       !url.pathname.startsWith('/ws') &&
       !url.pathname.startsWith('/websocket') &&
@@ -220,6 +225,60 @@ export default {
     const id = env.ROOM_HUB.idFromName('global-room-hub')
     return env.ROOM_HUB.get(id).fetch(request)
   },
+}
+
+function coverProxyHeaders(contentType = 'image/jpeg') {
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': `public, max-age=${coverCacheTtl}, s-maxage=${coverCacheTtl}, stale-while-revalidate=86400`,
+    'Content-Type': contentType,
+    'Cross-Origin-Resource-Policy': 'cross-origin',
+    'X-Content-Type-Options': 'nosniff',
+  }
+}
+
+async function handleCoverProxy(request: Request) {
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: coverProxyHeaders() })
+  }
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return Response.json({ ok: false, error: 'method_not_allowed' }, { status: 405 })
+  }
+
+  const url = new URL(request.url)
+  const src = url.searchParams.get('src')
+  if (!src) return Response.json({ ok: false, error: 'missing_src' }, { status: 400 })
+
+  let upstreamUrl: URL
+  try {
+    upstreamUrl = new URL(src)
+  } catch {
+    return Response.json({ ok: false, error: 'invalid_src' }, { status: 400 })
+  }
+
+  if (upstreamUrl.protocol !== 'https:' || !coverHosts.has(upstreamUrl.hostname)) {
+    return Response.json({ ok: false, error: 'unsupported_src' }, { status: 400 })
+  }
+
+  try {
+    const upstream = await fetch(upstreamUrl.toString(), {
+      headers: {
+        accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'user-agent': 'RatingGate/1.0 (+https://ratinggate.cn)',
+      },
+      cf: { cacheEverything: true, cacheTtl: coverCacheTtl },
+    })
+    const contentType = upstream.headers.get('Content-Type') ?? 'image/jpeg'
+    if (!upstream.ok || !contentType.toLowerCase().startsWith('image/')) {
+      return Response.json({ ok: false, error: 'cover_unavailable' }, { status: 502 })
+    }
+    if (request.method === 'HEAD') {
+      return new Response(null, { status: 200, headers: coverProxyHeaders(contentType) })
+    }
+    return new Response(upstream.body, { status: 200, headers: coverProxyHeaders(contentType) })
+  } catch {
+    return Response.json({ ok: false, error: 'cover_fetch_failed' }, { status: 502 })
+  }
 }
 
 export class RoomHub {

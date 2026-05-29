@@ -199,6 +199,8 @@ const ANALYTICS_URL = import.meta.env.VITE_ANALYTICS_URL ?? apiUrl('/api/results
 const ANALYTICS_CONSENT_URL = apiUrl('/api/analytics/consent')
 const ANALYTICS_BENCHMARK_URL = apiUrl('/api/analytics/benchmark')
 const ADMIN_ANALYTICS_URL = apiUrl('/api/admin/analytics')
+const COVER_PROXY_URL = apiUrl('/api/cover')
+const SHOULD_PROXY_COVERS = location.protocol === 'https:' || Boolean(import.meta.env.VITE_API_BASE_URL)
 const ANALYTICS_CONSENT_KEY = 'rating-gate-analytics-consent-v1'
 const ANALYTICS_MAX_ANSWERS = 80
 const BENCHMARK_MIN_SAMPLES = 30
@@ -213,6 +215,19 @@ const seedPaths: Record<MediaKind, { data: string; meta: string }> = {
   galgame: { data: '/galgame-seed.json', meta: '/galgame-seed-meta.json' },
 }
 const subjectCache = new Map<MediaKind, RatedSubject[]>()
+
+function coverUrl(src: string | undefined) {
+  if (!src) return ''
+  try {
+    const url = new URL(src)
+    if (SHOULD_PROXY_COVERS && ['lain.bgm.tv', 'bgm.tv', 'bangumi.tv', 'chii.in'].includes(url.hostname)) {
+      return `${COVER_PROXY_URL}?src=${encodeURIComponent(url.toString())}`
+    }
+  } catch {
+    return src
+  }
+  return src
+}
 const dataUpdatedAt = new Map<MediaKind, string>()
 let subjects: RatedSubject[] = []
 let pool: RatedSubject[] = []
@@ -1572,8 +1587,9 @@ function renderRoomSide(side: Side, pair: RemotePair | null, reveal: RemoteRevea
       view.image.removeAttribute('src')
     }
   }
-  if (view.image.src !== subject.image) {
-    view.image.src = subject.image
+  const proxiedImage = coverUrl(subject.image)
+  if (view.image.getAttribute('src') !== proxiedImage) {
+    view.image.src = proxiedImage
   } else if (view.image.complete && view.image.naturalWidth > 0) {
     view.poster.dataset.loading = 'false'
   }
@@ -2100,8 +2116,9 @@ function renderCard(side: Side, subject: RatedSubject | null) {
       view.image.removeAttribute('src')
     }
   }
-  if (view.image.src !== subject.image) {
-    view.image.src = subject.image
+  const proxiedImage = coverUrl(subject.image)
+  if (view.image.getAttribute('src') !== proxiedImage) {
+    view.image.src = proxiedImage
   } else if (view.image.complete && view.image.naturalWidth > 0) {
     view.poster.dataset.loading = 'false'
   }
@@ -3275,12 +3292,20 @@ async function loadAdminAnalytics() {
       headers: { authorization: `Bearer ${token}` },
       cache: 'no-store',
     })
-    const data = (await response.json()) as AdminAnalyticsReport & { error?: string }
-    if (!response.ok || !data.ok) {
+    const responseText = await response.text()
+    let data: (AdminAnalyticsReport & { error?: string }) | null = null
+    try {
+      data = JSON.parse(responseText) as AdminAnalyticsReport & { error?: string }
+    } catch {
+      data = null
+    }
+    if (!response.ok || !data || !data.ok) {
       byId.adminMessage.textContent =
-        data.error === 'unauthorized'
+        response.status === 429
+          ? '请求过于频繁，请稍等几秒后再试。'
+          : data?.error === 'unauthorized'
           ? '密钥不正确，无法读取后台数据。'
-          : data.error === 'admin_not_configured'
+          : data?.error === 'admin_not_configured'
             ? '后台密钥还没有在 Cloudflare Worker Secret 中配置。'
             : '后台数据读取失败，请稍后再试。'
       return
