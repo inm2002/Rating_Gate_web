@@ -287,7 +287,7 @@ export class RoomHub {
   private rooms = new Map<string, Room>()
   private clients = new Map<WebSocket, { roomCode: string; playerId: string }>()
   private allSubjects = new Map<MediaKind, Anime[]>()
-  private seedPromise: Promise<Map<MediaKind, Anime[]>> | null = null
+  private seedPromises = new Map<MediaKind, Promise<Anime[]>>()
   private publicRate = new Map<string, PublicRateStats>()
   private benchmarkCache = new Map<string, { expiresAt: number; stats: DistributionStats }>()
 
@@ -309,13 +309,11 @@ export class RoomHub {
       return this.handleAdminAnalytics(request)
     }
     if (url.pathname.startsWith('/api/results')) {
-      await this.loadSubjectSeeds(request)
       return this.handleAnalyticsResult(request)
     }
 
     const upgradeHeader = request.headers.get('upgrade')
     if (upgradeHeader?.toLowerCase() === 'websocket') {
-      await this.loadSubjectSeeds(request)
       const pair = new WebSocketPair()
       const [client, server] = Object.values(pair)
       server.accept()
@@ -323,7 +321,6 @@ export class RoomHub {
       return new Response(null, { status: 101, webSocket: client })
     }
 
-    await this.loadSubjectSeeds(request)
     return Response.json(
       {
         ok: true,
@@ -351,23 +348,28 @@ export class RoomHub {
     }
   }
 
-  private async loadSubjectSeeds(request: Request) {
-    if (this.allSubjects.size === mediaKinds.length) return this.allSubjects
+  private async loadSubjectSeed(mediaKind: MediaKind, request: Request) {
+    const cached = this.allSubjects.get(mediaKind)
+    if (cached) return cached
+    const existing = this.seedPromises.get(mediaKind)
+    if (existing) return existing
     const origin = new URL(request.url).origin
     const seedBaseUrl = this.env.SEED_BASE_URL?.replace(/\/$/, '')
-    this.seedPromise ??= Promise.all(
-      mediaKinds.map(async (mediaKind) => {
-        const animeSeedUrl = mediaKind === 'anime' ? this.env.SEED_URL : undefined
-        const response = await fetch(animeSeedUrl || `${seedBaseUrl || origin}/${seedFiles[mediaKind]}`)
+    const animeSeedUrl = mediaKind === 'anime' ? this.env.SEED_URL : undefined
+    const promise = fetch(animeSeedUrl || `${seedBaseUrl || origin}/${seedFiles[mediaKind]}`)
+      .then(async (response) => {
         if (!response.ok) throw new Error(`Failed to load ${mediaKind} seed: HTTP ${response.status}`)
         const rows = (await response.json()) as Anime[]
-        return [mediaKind, rows.map((row) => ({ ...row, mediaKind: row.mediaKind ?? mediaKind }))] as const
-      }),
-    ).then((entries) => {
-      this.allSubjects = new Map(entries)
-      return this.allSubjects
-    })
-    return this.seedPromise
+        const subjects = rows.map((row) => ({ ...row, mediaKind: row.mediaKind ?? mediaKind }))
+        this.allSubjects.set(mediaKind, subjects)
+        return subjects
+      })
+      .catch((error) => {
+        this.seedPromises.delete(mediaKind)
+        throw error
+      })
+    this.seedPromises.set(mediaKind, promise)
+    return promise
   }
 
   private open(ws: WebSocket) {
@@ -389,12 +391,11 @@ export class RoomHub {
       return
     }
     const room = this.findRoomFor(ws)
-    if (payload.type === 'createRoom') this.createRoom(ws, payload)
+    if (payload.type === 'createRoom') void this.createRoom(ws, payload)
     else if (payload.type === 'joinRoom') this.joinRoom(ws, payload)
     else if (payload.type === 'updateSettings' && room && this.requireHost(ws, room)) {
-      this.updateRoomSettings(room, payload)
-      this.broadcastRoom(room)
-    } else if (payload.type === 'startGame') this.startGame(ws)
+      void this.updateRoomSettings(room, payload)
+    } else if (payload.type === 'startGame') void this.startGame(ws)
     else if (payload.type === 'answer') this.answer(ws, payload)
     else if (payload.type === 'returnToLobby') this.returnToLobby(ws)
     else if (payload.type === 'updateNickname') this.updateNickname(ws, payload)
@@ -665,15 +666,6 @@ export class RoomHub {
     const actual = this.adminTokenFrom(request)
     if (this.adminTokenMatches(actual, expected)) {
       await this.clearAdminRateLimit(request)
-      try {
-        await this.loadSubjectSeeds(request)
-      } catch (error) {
-        console.error('Failed to load admin analytics seeds', error)
-        return Response.json(
-          { ok: false, error: 'admin_seed_load_failed' },
-          { status: 500, headers: this.apiHeaders() },
-        )
-      }
       let report: Awaited<ReturnType<RoomHub['buildAnalyticsReport']>>
       try {
         report = await this.buildAnalyticsReport()
@@ -884,6 +876,12 @@ export class RoomHub {
       return Response.json({ ok: true, duplicate: true }, { headers: this.apiHeaders() })
     }
 
+    try {
+      await this.loadSubjectSeed(mediaKind, request)
+    } catch (error) {
+      console.error('Failed to load analytics seed', error)
+      return Response.json({ ok: false, error: 'analytics_seed_load_failed' }, { status: 500, headers: this.apiHeaders() })
+    }
     const subjects = this.analyticsSubjectMap(mediaKind)
     const validAnswers = answers
       .map((answer) => this.normalizeAnalyticsAnswer(answer, subjects))
@@ -1184,7 +1182,7 @@ export class RoomHub {
     }
   }
 
-  private updateRoomSettings(room: Room, payload: Record<string, unknown>) {
+  private async updateRoomSettings(room: Room, payload: Record<string, unknown>) {
     if (room.status !== 'lobby') return
     const payloadSettings = payload.settings as Partial<Settings> | undefined
     room.mode = this.sanitizeMode(payload.mode)
@@ -1194,7 +1192,18 @@ export class RoomHub {
     })
     room.classicRounds = this.sanitizeLength('classic', payload.classicRounds ?? payload.length)
     room.timedSeconds = this.sanitizeLength('timed', payload.timedSeconds ?? payload.length)
+    try {
+      await this.loadSubjectSeed(room.settings.mediaKind, new Request('https://ratinggate.cn/ws'))
+    } catch (error) {
+      console.error('Failed to load room settings seed', error)
+      this.send(room.players.get(room.hostId)?.ws as WebSocket, {
+        type: 'error',
+        message: '题库数据暂时读取失败，请稍后再试。',
+      })
+      return
+    }
     room.poolCount = this.filterSubjects(room.settings).length
+    this.broadcastRoom(room)
   }
 
   private requireHost(ws: WebSocket, room: Room) {
@@ -1224,7 +1233,7 @@ export class RoomHub {
     return player
   }
 
-  private createRoom(ws: WebSocket, payload: Record<string, unknown>) {
+  private async createRoom(ws: WebSocket, payload: Record<string, unknown>) {
     const code = this.roomCode()
     const mode = this.sanitizeMode(payload.mode)
     const payloadSettings = payload.settings as Partial<Settings> | undefined
@@ -1232,6 +1241,13 @@ export class RoomHub {
       ...payloadSettings,
       mediaKind: this.sanitizeMediaKind(payload.mediaKind ?? payloadSettings?.mediaKind),
     })
+    try {
+      await this.loadSubjectSeed(settings.mediaKind, new Request('https://ratinggate.cn/ws'))
+    } catch (error) {
+      console.error('Failed to load create room seed', error)
+      this.send(ws, { type: 'error', message: '题库数据暂时读取失败，请稍后再试。' })
+      return
+    }
     const room: Room = {
       code,
       hostId: '',
@@ -1277,9 +1293,16 @@ export class RoomHub {
     this.broadcastRoom(room)
   }
 
-  private startGame(ws: WebSocket) {
+  private async startGame(ws: WebSocket) {
     const room = this.findRoomFor(ws)
     if (!room || !this.requireHost(ws, room)) return
+    try {
+      await this.loadSubjectSeed(room.settings.mediaKind, new Request('https://ratinggate.cn/ws'))
+    } catch (error) {
+      console.error('Failed to load start game seed', error)
+      this.send(ws, { type: 'error', message: '题库数据暂时读取失败，请稍后再试。' })
+      return
+    }
     room.pool = this.filterSubjects(room.settings)
     if (!this.pickPair(room.pool)) {
       this.send(ws, { type: 'error', message: '当前筛选下题目不足，或评分都相同。' })

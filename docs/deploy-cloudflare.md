@@ -202,6 +202,14 @@ ratinggate.cn/api/*
 ```
 
 如果使用其他域名，需要同步修改 `worker/wrangler.toml` 中的 `routes`。
+同时建议配置 `SEED_BASE_URL` 为 Cloudflare Pages 自动分配的项目域名：
+
+```toml
+[vars]
+SEED_BASE_URL = "https://<Pages 项目名>.pages.dev"
+```
+
+Worker 会通过这个地址读取题库 JSON。生产环境不建议让 Worker 通过同一个自定义域名回读静态题库文件；使用 `*.pages.dev` 项目域名可以避免自定义域名下的 Worker 路由、WAF 或递归访问影响题库读取。
 
 ### 5. 配置后台密钥
 

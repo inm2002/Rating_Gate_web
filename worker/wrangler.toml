@@ -7,6 +7,9 @@ routes = [
   { pattern = "ratinggate.cn/api/*", zone_name = "ratinggate.cn" }
 ]
 
+[vars]
+SEED_BASE_URL = "https://rating-gate-web.pages.dev"
+
 [[durable_objects.bindings]]
 name = "ROOM_HUB"
 class_name = "RoomHub"
