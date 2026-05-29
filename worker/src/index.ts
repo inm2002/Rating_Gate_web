@@ -356,7 +356,12 @@ export class RoomHub {
     const origin = new URL(request.url).origin
     const seedBaseUrl = this.env.SEED_BASE_URL?.replace(/\/$/, '')
     const animeSeedUrl = mediaKind === 'anime' ? this.env.SEED_URL : undefined
-    const promise = fetch(animeSeedUrl || `${seedBaseUrl || origin}/${seedFiles[mediaKind]}`)
+    const promise = fetch(animeSeedUrl || `${seedBaseUrl || origin}/${seedFiles[mediaKind]}`, {
+      headers: {
+        accept: 'application/json',
+        'user-agent': 'RatingGate/1.0 (+https://ratinggate.cn)',
+      },
+    })
       .then(async (response) => {
         if (!response.ok) throw new Error(`Failed to load ${mediaKind} seed: HTTP ${response.status}`)
         const rows = (await response.json()) as Anime[]
@@ -668,6 +673,7 @@ export class RoomHub {
       await this.clearAdminRateLimit(request)
       let report: Awaited<ReturnType<RoomHub['buildAnalyticsReport']>>
       try {
+        await this.hydrateAnalyticsSubjectMaps(request)
         report = await this.buildAnalyticsReport()
       } catch (error) {
         console.error('Failed to build admin analytics report', error)
@@ -844,6 +850,21 @@ export class RoomHub {
         topPairs,
       },
     }
+  }
+
+  private async hydrateAnalyticsSubjectMaps(request: Request) {
+    const pairEntries = await this.state.storage.list<PairStats>({ prefix: 'analytics:pair:', limit: 1000 })
+    const neededKinds = new Set<MediaKind>()
+    for (const pair of pairEntries.values()) {
+      if (mediaKinds.includes(pair.mediaKind)) neededKinds.add(pair.mediaKind)
+    }
+    await Promise.all(
+      [...neededKinds].map((mediaKind) =>
+        this.loadSubjectSeed(mediaKind, request).catch((error) => {
+          console.error(`Failed to load ${mediaKind} names for admin analytics`, error)
+        }),
+      ),
+    )
   }
 
   private async handleAnalyticsResult(request: Request) {
