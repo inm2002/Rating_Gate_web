@@ -100,14 +100,14 @@ Expression:
     http.request.uri.path eq "/manga-seed.json" or
     http.request.uri.path eq "/light-novel-seed.json" or
     http.request.uri.path eq "/galgame-seed.json" or
-    starts_with(http.request.uri.path, "/api/analytics/benchmark") or
-    starts_with(http.request.uri.path, "/api/admin/analytics")))
+    starts_with(http.request.uri.path, "/api/analytics/benchmark")))
 Action:
   Managed Challenge
 ```
 
 不要对所有中国大陆访问或所有移动端访问设置挑战；这会伤害正常用户体验。
 Cloudflare Free 套餐不支持 `matches` 正则操作符，以上表达式使用 `eq` 和 `starts_with`，便于直接在免费套餐中配置。
+后台接口 `/api/admin/analytics` 不建议放入 Managed Challenge 或边缘限流规则；它已经由 Worker Secret 鉴权保护，保持接口直接返回 JSON 更利于排查登录问题。
 
 ### Rate Limiting Rules
 

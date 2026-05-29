@@ -665,8 +665,25 @@ export class RoomHub {
     const actual = this.adminTokenFrom(request)
     if (this.adminTokenMatches(actual, expected)) {
       await this.clearAdminRateLimit(request)
-      await this.loadSubjectSeeds(request)
-      const report = await this.buildAnalyticsReport()
+      try {
+        await this.loadSubjectSeeds(request)
+      } catch (error) {
+        console.error('Failed to load admin analytics seeds', error)
+        return Response.json(
+          { ok: false, error: 'admin_seed_load_failed' },
+          { status: 500, headers: this.apiHeaders() },
+        )
+      }
+      let report: Awaited<ReturnType<RoomHub['buildAnalyticsReport']>>
+      try {
+        report = await this.buildAnalyticsReport()
+      } catch (error) {
+        console.error('Failed to build admin analytics report', error)
+        return Response.json(
+          { ok: false, error: 'admin_report_failed' },
+          { status: 500, headers: this.apiHeaders() },
+        )
+      }
       return Response.json({ ok: true, ...report }, { headers: this.apiHeaders() })
     }
     const limited = await this.checkAdminRateLimit(request)

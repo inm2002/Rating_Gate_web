@@ -3304,6 +3304,7 @@ async function loadAdminAnalytics() {
         data?.retryAfter && Number.isFinite(Number(data.retryAfter))
           ? `，约 ${Math.max(1, Math.ceil(Number(data.retryAfter)))} 秒后再试`
           : ''
+      const statusText = response.status ? `（HTTP ${response.status}）` : ''
       byId.adminMessage.textContent =
         data?.error === 'too_many_attempts'
           ? `密钥错误次数过多，请稍后再试${retryText}。`
@@ -3313,7 +3314,13 @@ async function loadAdminAnalytics() {
             ? '密钥不正确，无法读取后台数据。'
             : data?.error === 'admin_not_configured'
               ? '后台密钥还没有在 Cloudflare Worker Secret 中配置。'
-              : '后台数据读取失败，请稍后再试。'
+              : data?.error === 'admin_seed_load_failed'
+                ? `密钥已通过，但后台读取题库数据失败${statusText}。请检查 Cloudflare Worker 能否访问站点上的 seed JSON。`
+                : data?.error === 'admin_report_failed'
+                  ? `密钥已通过，但统计报表生成失败${statusText}。请稍后重试，或查看 Worker 日志。`
+                  : data?.error
+                    ? `后台数据读取失败${statusText}：${data.error}`
+                    : `后台接口返回异常${statusText}，可能被 Cloudflare 规则或网络中间页拦截。`
       return
     }
     renderAdminReport(data)
