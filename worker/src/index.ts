@@ -27,6 +27,9 @@ interface AnalyticsAnswer {
   selectedId: number
 }
 
+type AnalyticsSource = 'solo' | 'multiplayer' | 'unknown'
+type AnalyticsPreset = 'standard' | 'akashi' | 'brahmin' | 'custom' | 'unknown'
+
 interface AnalyticsPayload {
   version?: number
   source?: 'solo' | 'multiplayer'
@@ -34,6 +37,7 @@ interface AnalyticsPayload {
   mediaKind?: MediaKind
   mode?: Mode
   length?: number
+  preset?: string | null
   answers?: AnalyticsAnswer[]
 }
 
@@ -177,7 +181,16 @@ const seedFiles: Record<MediaKind, string> = {
   lightNovel: 'light-novel-seed.json',
   galgame: 'galgame-seed.json',
 }
+const seedMetaFiles: Record<MediaKind, string> = {
+  anime: 'anime-seed-meta.json',
+  manga: 'manga-seed-meta.json',
+  lightNovel: 'light-novel-seed-meta.json',
+  galgame: 'galgame-seed-meta.json',
+}
 const coverCacheTtl = 60 * 60 * 24 * 30
+const analyticsV2SchemaVersion = 2
+const analyticsSeenRetentionDays = 14
+const analyticsLegacyPageSize = 1000
 const coverHosts = new Set(['lain.bgm.tv', 'bgm.tv', 'bangumi.tv', 'chii.in'])
 const presetExcludeDefaults: ExcludeKey[] = ['guochan', 'movies', 'oumei', 'recap']
 const tagFilterKeys: MediaTagFilterKey[] = [
@@ -287,6 +300,7 @@ export class RoomHub {
   private rooms = new Map<string, Room>()
   private clients = new Map<WebSocket, { roomCode: string; playerId: string }>()
   private allSubjects = new Map<MediaKind, Anime[]>()
+  private seedVersions = new Map<MediaKind, string>()
   private seedPromises = new Map<MediaKind, Promise<Anime[]>>()
   private publicRate = new Map<string, PublicRateStats>()
   private benchmarkCache = new Map<string, { expiresAt: number; stats: DistributionStats }>()
@@ -294,6 +308,130 @@ export class RoomHub {
   constructor(state: DurableObjectState, env: Env) {
     this.state = state
     this.env = env
+    this.ensureAnalyticsV2Schema()
+  }
+
+  private ensureAnalyticsV2Schema() {
+    const sql = this.state.storage.sql
+    sql.exec(`
+      CREATE TABLE IF NOT EXISTS analytics_v2_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS analytics_v2_seen_games (
+        game_id TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS analytics_v2_seen_games_created_idx
+        ON analytics_v2_seen_games(created_at);
+      CREATE TABLE IF NOT EXISTS analytics_v2_games_daily (
+        day TEXT NOT NULL,
+        media_kind TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        source TEXT NOT NULL,
+        length INTEGER NOT NULL,
+        preset TEXT NOT NULL,
+        game_count INTEGER NOT NULL DEFAULT 0,
+        answer_count INTEGER NOT NULL DEFAULT 0,
+        correct_count INTEGER NOT NULL DEFAULT 0,
+        bucket_0 INTEGER NOT NULL DEFAULT 0,
+        bucket_1 INTEGER NOT NULL DEFAULT 0,
+        bucket_2 INTEGER NOT NULL DEFAULT 0,
+        bucket_3 INTEGER NOT NULL DEFAULT 0,
+        bucket_4 INTEGER NOT NULL DEFAULT 0,
+        bucket_5 INTEGER NOT NULL DEFAULT 0,
+        bucket_6 INTEGER NOT NULL DEFAULT 0,
+        bucket_7 INTEGER NOT NULL DEFAULT 0,
+        bucket_8 INTEGER NOT NULL DEFAULT 0,
+        bucket_9 INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(day, media_kind, mode, source, length, preset)
+      );
+      CREATE TABLE IF NOT EXISTS analytics_v2_pairs (
+        media_kind TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        source TEXT NOT NULL,
+        subject_a_id INTEGER NOT NULL,
+        subject_b_id INTEGER NOT NULL,
+        score_a REAL NOT NULL,
+        score_b REAL NOT NULL,
+        votes_a INTEGER NOT NULL,
+        votes_b INTEGER NOT NULL,
+        score_diff_bucket TEXT NOT NULL,
+        seed_version TEXT NOT NULL,
+        shown_count INTEGER NOT NULL DEFAULT 0,
+        correct_count INTEGER NOT NULL DEFAULT 0,
+        wrong_count INTEGER NOT NULL DEFAULT 0,
+        a_selected_count INTEGER NOT NULL DEFAULT 0,
+        b_selected_count INTEGER NOT NULL DEFAULT 0,
+        a_winner_count INTEGER NOT NULL DEFAULT 0,
+        b_winner_count INTEGER NOT NULL DEFAULT 0,
+        a_winner_correct_count INTEGER NOT NULL DEFAULT 0,
+        b_winner_correct_count INTEGER NOT NULL DEFAULT 0,
+        a_shown_left_count INTEGER NOT NULL DEFAULT 0,
+        a_shown_right_count INTEGER NOT NULL DEFAULT 0,
+        selected_left_count INTEGER NOT NULL DEFAULT 0,
+        selected_right_count INTEGER NOT NULL DEFAULT 0,
+        winner_left_count INTEGER NOT NULL DEFAULT 0,
+        winner_right_count INTEGER NOT NULL DEFAULT 0,
+        first_seen_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(media_kind, mode, source, subject_a_id, subject_b_id)
+      );
+      CREATE TABLE IF NOT EXISTS analytics_v2_pairs_daily (
+        day TEXT NOT NULL,
+        media_kind TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        source TEXT NOT NULL,
+        subject_a_id INTEGER NOT NULL,
+        subject_b_id INTEGER NOT NULL,
+        shown_count INTEGER NOT NULL DEFAULT 0,
+        correct_count INTEGER NOT NULL DEFAULT 0,
+        wrong_count INTEGER NOT NULL DEFAULT 0,
+        a_selected_count INTEGER NOT NULL DEFAULT 0,
+        b_selected_count INTEGER NOT NULL DEFAULT 0,
+        selected_left_count INTEGER NOT NULL DEFAULT 0,
+        selected_right_count INTEGER NOT NULL DEFAULT 0,
+        winner_left_count INTEGER NOT NULL DEFAULT 0,
+        winner_right_count INTEGER NOT NULL DEFAULT 0,
+        score_a REAL NOT NULL,
+        score_b REAL NOT NULL,
+        seed_version TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(day, media_kind, mode, source, subject_a_id, subject_b_id)
+      );
+      CREATE TABLE IF NOT EXISTS analytics_v2_segments_daily (
+        day TEXT NOT NULL,
+        media_kind TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        source TEXT NOT NULL,
+        diff_bucket TEXT NOT NULL,
+        round_bucket TEXT NOT NULL,
+        shown_count INTEGER NOT NULL DEFAULT 0,
+        correct_count INTEGER NOT NULL DEFAULT 0,
+        selected_left_count INTEGER NOT NULL DEFAULT 0,
+        selected_right_count INTEGER NOT NULL DEFAULT 0,
+        winner_left_count INTEGER NOT NULL DEFAULT 0,
+        winner_right_count INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(day, media_kind, mode, source, diff_bucket, round_bucket)
+      );
+      CREATE TABLE IF NOT EXISTS analytics_v2_consent_daily (
+        day TEXT PRIMARY KEY,
+        shown_count INTEGER NOT NULL DEFAULT 0,
+        accepted_count INTEGER NOT NULL DEFAULT 0,
+        declined_count INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+    `)
+    const now = new Date().toISOString()
+    sql.exec(
+      `INSERT INTO analytics_v2_meta(key, value, updated_at) VALUES('schema_version', ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      String(analyticsV2SchemaVersion),
+      now,
+    )
   }
 
   async fetch(request: Request) {
@@ -356,7 +494,8 @@ export class RoomHub {
     const origin = new URL(request.url).origin
     const seedBaseUrl = this.env.SEED_BASE_URL?.replace(/\/$/, '')
     const animeSeedUrl = mediaKind === 'anime' ? this.env.SEED_URL : undefined
-    const promise = fetch(animeSeedUrl || `${seedBaseUrl || origin}/${seedFiles[mediaKind]}`, {
+    const baseUrl = seedBaseUrl || origin
+    const promise = fetch(animeSeedUrl || `${baseUrl}/${seedFiles[mediaKind]}`, {
       headers: {
         accept: 'application/json',
         'user-agent': 'RatingGate/1.0 (+https://ratinggate.cn)',
@@ -367,6 +506,20 @@ export class RoomHub {
         const rows = (await response.json()) as Anime[]
         const subjects = rows.map((row) => ({ ...row, mediaKind: row.mediaKind ?? mediaKind }))
         this.allSubjects.set(mediaKind, subjects)
+        try {
+          const metaResponse = await fetch(`${baseUrl}/${seedMetaFiles[mediaKind]}`, {
+            headers: {
+              accept: 'application/json',
+              'user-agent': 'RatingGate/1.0 (+https://ratinggate.cn)',
+            },
+          })
+          if (metaResponse.ok) {
+            const meta = (await metaResponse.json()) as { generatedAt?: string }
+            this.seedVersions.set(mediaKind, String(meta.generatedAt ?? 'unknown').slice(0, 40))
+          }
+        } catch {
+          // 题库版本只用于分析复现，读取失败不影响游戏或统计写入。
+        }
         return subjects
       })
       .catch((error) => {
@@ -499,17 +652,57 @@ export class RoomHub {
     return mode === 'timed' ? raw : Math.max(1, Math.min(50, raw))
   }
 
+  private analyticsSource(value: unknown): AnalyticsSource {
+    return value === 'solo' || value === 'multiplayer' ? value : 'unknown'
+  }
+
+  private analyticsPreset(value: unknown): AnalyticsPreset {
+    return value === 'standard' || value === 'akashi' || value === 'brahmin' || value === 'custom'
+      ? value
+      : 'unknown'
+  }
+
+  private analyticsRoundBucket(index: number) {
+    if (index < 5) return '1-5'
+    if (index < 10) return '6-10'
+    if (index < 20) return '11-20'
+    return '21+'
+  }
+
+  private async listAllStorage<T>(prefix: string) {
+    const all = new Map<string, T>()
+    let startAfter: string | undefined
+    while (true) {
+      const page = await this.state.storage.list<T>({
+        prefix,
+        limit: analyticsLegacyPageSize,
+        ...(startAfter ? { startAfter } : {}),
+      })
+      for (const [key, value] of page) all.set(key, value)
+      if (page.size < analyticsLegacyPageSize) break
+      const lastKey = [...page.keys()].at(-1)
+      if (!lastKey || lastKey === startAfter) break
+      startAfter = lastKey
+    }
+    return all
+  }
+
   private analyticsSubjectMap(mediaKind: MediaKind) {
     return new Map((this.allSubjects.get(mediaKind) ?? []).map((subject) => [subject.id, subject]))
   }
 
-  private async isDuplicateGame(gameId: string) {
+  private async isLegacyDuplicateGame(gameId: string) {
     const key = 'analytics:recent-games'
     const recent = ((await this.state.storage.get<string[]>(key)) ?? []).slice(-500)
-    if (recent.includes(gameId)) return true
+    return recent.includes(gameId)
+  }
+
+  private async rememberRecentGame(gameId: string) {
+    const key = 'analytics:recent-games'
+    const recent = ((await this.state.storage.get<string[]>(key)) ?? []).slice(-500)
+    if (recent.includes(gameId)) return
     recent.push(gameId)
     await this.state.storage.put(key, recent.slice(-500))
-    return false
   }
 
   private async handleAnalyticsConsent(request: Request) {
@@ -525,19 +718,16 @@ export class RoomHub {
     } catch {
       event = 'accepted'
     }
-    const key = 'analytics:consent:accepted'
-    const saved = await this.state.storage.get<Partial<ConsentStats>>(key)
-    const current = {
-      shownCount: saved?.shownCount ?? 0,
-      acceptedCount: saved?.acceptedCount ?? 0,
-      declinedCount: saved?.declinedCount ?? 0,
-      updatedAt: saved?.updatedAt ?? '',
-    } satisfies ConsentStats
-    if (event === 'shown') current.shownCount += 1
-    if (event === 'accepted') current.acceptedCount += 1
-    if (event === 'declined') current.declinedCount += 1
-    current.updatedAt = new Date().toISOString()
-    await this.state.storage.put(key, current)
+    const now = new Date().toISOString()
+    const day = now.slice(0, 10)
+    const column = event === 'shown' ? 'shown_count' : event === 'declined' ? 'declined_count' : 'accepted_count'
+    this.state.storage.sql.exec(
+      `INSERT INTO analytics_v2_consent_daily(day, ${column}, updated_at)
+       VALUES(?, 1, ?)
+       ON CONFLICT(day) DO UPDATE SET ${column} = ${column} + 1, updated_at = excluded.updated_at`,
+      day,
+      now,
+    )
     return Response.json({ ok: true, event }, { headers: this.apiHeaders() })
   }
 
@@ -671,6 +861,19 @@ export class RoomHub {
     const actual = this.adminTokenFrom(request)
     if (this.adminTokenMatches(actual, expected)) {
       await this.clearAdminRateLimit(request)
+      const url = new URL(request.url)
+      if (url.pathname === '/api/admin/analytics/export') {
+        try {
+          await this.hydrateAnalyticsSubjectMaps(request)
+          return await this.handleAdminAnalyticsExport(url)
+        } catch (error) {
+          console.error('Failed to export admin analytics', error)
+          return Response.json(
+            { ok: false, error: 'admin_export_failed' },
+            { status: 500, headers: this.apiHeaders() },
+          )
+        }
+      }
       let report: Awaited<ReturnType<RoomHub['buildAnalyticsReport']>>
       try {
         await this.hydrateAnalyticsSubjectMaps(request)
@@ -687,6 +890,147 @@ export class RoomHub {
     const limited = await this.checkAdminRateLimit(request)
     if (limited) return limited
     return this.recordAdminFailure(request)
+  }
+
+  private csvCell(value: unknown) {
+    const text = value === null || value === undefined ? '' : String(value)
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+  }
+
+  private async handleAdminAnalyticsExport(url: URL) {
+    const exportedAt = new Date().toISOString()
+    const legacyDistributions = await this.listAllStorage<DistributionStats>('analytics:distribution:')
+    const legacyPairs = await this.listAllStorage<PairStats>('analytics:pair:')
+    const v2GamesDaily = this.state.storage.sql.exec<Record<string, string | number>>(
+      'SELECT * FROM analytics_v2_games_daily ORDER BY day, media_kind, mode, source, length, preset',
+    ).toArray()
+    const v2Pairs = this.state.storage.sql.exec<Record<string, string | number>>(
+      'SELECT * FROM analytics_v2_pairs ORDER BY media_kind, mode, source, subject_a_id, subject_b_id',
+    ).toArray()
+    const v2PairsDaily = this.state.storage.sql.exec<Record<string, string | number>>(
+      'SELECT * FROM analytics_v2_pairs_daily ORDER BY day, media_kind, mode, source, subject_a_id, subject_b_id',
+    ).toArray()
+    const v2SegmentsDaily = this.state.storage.sql.exec<Record<string, string | number>>(
+      'SELECT * FROM analytics_v2_segments_daily ORDER BY day, media_kind, mode, source, diff_bucket, round_bucket',
+    ).toArray()
+    const v2ConsentDaily = this.state.storage.sql.exec<Record<string, string | number>>(
+      'SELECT * FROM analytics_v2_consent_daily ORDER BY day',
+    ).toArray()
+    const subjectIds = new Map<MediaKind, Set<number>>(mediaKinds.map((kind) => [kind, new Set<number>()]))
+    for (const pair of legacyPairs.values()) {
+      subjectIds.get(pair.mediaKind)?.add(pair.subjectAId)
+      subjectIds.get(pair.mediaKind)?.add(pair.subjectBId)
+    }
+    for (const pair of v2Pairs) {
+      const kind = String(pair.media_kind) as MediaKind
+      subjectIds.get(kind)?.add(Number(pair.subject_a_id))
+      subjectIds.get(kind)?.add(Number(pair.subject_b_id))
+    }
+    const subjects = mediaKinds.flatMap((mediaKind) => {
+      const ids = subjectIds.get(mediaKind) ?? new Set<number>()
+      return (this.allSubjects.get(mediaKind) ?? [])
+        .filter((subject) => ids.has(subject.id))
+        .map((subject) => ({
+          mediaKind,
+          id: subject.id,
+          name: subject.name,
+          nameCn: subject.nameCn,
+          score: subject.score,
+          votes: subject.votes,
+          rank: subject.rank,
+          date: subject.date,
+          platform: subject.platform,
+          tags: subject.tags,
+          seedVersion: this.seedVersions.get(mediaKind) ?? 'unknown',
+        }))
+    })
+
+    if (url.searchParams.get('format') === 'csv') {
+      const headers = [
+        'era', 'mediaKind', 'mode', 'source', 'subjectAId', 'subjectBId', 'scoreA', 'scoreB',
+        'votesA', 'votesB', 'scoreDiffBucket', 'shownCount', 'correctCount', 'wrongCount',
+        'aSelectedCount', 'bSelectedCount', 'aShownLeftCount', 'aShownRightCount',
+        'selectedLeftCount', 'selectedRightCount', 'winnerLeftCount', 'winnerRightCount',
+        'seedVersion', 'firstSeenAt', 'updatedAt',
+      ]
+      const rows: unknown[][] = []
+      for (const pair of legacyPairs.values()) {
+        const map = new Map((this.allSubjects.get(pair.mediaKind) ?? []).map((subject) => [subject.id, subject]))
+        rows.push([
+          'legacy', pair.mediaKind, pair.mode, 'legacy', pair.subjectAId, pair.subjectBId,
+          pair.scoreA, pair.scoreB, map.get(pair.subjectAId)?.votes ?? '', map.get(pair.subjectBId)?.votes ?? '',
+          pair.scoreDiffBucket, pair.shownCount, pair.correctCount, pair.wrongCount,
+          pair.aSelectedCount, pair.bSelectedCount, '', '', '', '', '', '', 'legacy', '', pair.updatedAt,
+        ])
+      }
+      for (const pair of v2Pairs) {
+        rows.push([
+          'v2', pair.media_kind, pair.mode, pair.source, pair.subject_a_id, pair.subject_b_id,
+          pair.score_a, pair.score_b, pair.votes_a, pair.votes_b, pair.score_diff_bucket,
+          pair.shown_count, pair.correct_count, pair.wrong_count, pair.a_selected_count, pair.b_selected_count,
+          pair.a_shown_left_count, pair.a_shown_right_count, pair.selected_left_count, pair.selected_right_count,
+          pair.winner_left_count, pair.winner_right_count, pair.seed_version, pair.first_seen_at, pair.updated_at,
+        ])
+      }
+      const csv = [headers, ...rows].map((row) => row.map((value) => this.csvCell(value)).join(',')).join('\r\n')
+      return new Response(`\uFEFF${csv}`, {
+        headers: {
+          ...this.apiHeaders(),
+          'content-type': 'text/csv; charset=utf-8',
+          'content-disposition': `attachment; filename="rating-gate-pairs-${exportedAt.slice(0, 10)}.csv"`,
+        },
+      })
+    }
+
+    const overview = await this.buildAnalyticsReport()
+    const payload = {
+      manifest: {
+        product: 'Rating;Gate',
+        exportVersion: 1,
+        analyticsSchemaVersion: analyticsV2SchemaVersion,
+        exportedAt,
+        timezone: 'UTC',
+        privacy: 'Anonymous aggregate data only. No IP, user agent, nickname, room code, admin token, or per-user history.',
+        counts: {
+          legacyDistributions: legacyDistributions.size,
+          legacyPairs: legacyPairs.size,
+          v2GamesDaily: v2GamesDaily.length,
+          v2Pairs: v2Pairs.length,
+          v2PairsDaily: v2PairsDaily.length,
+          v2SegmentsDaily: v2SegmentsDaily.length,
+          v2ConsentDaily: v2ConsentDaily.length,
+          subjects: subjects.length,
+        },
+      },
+      overview,
+      legacy: {
+        note: 'Historical v1 aggregates. Missing dimensions are intentionally marked legacy/unknown.',
+        distributions: [...legacyDistributions].map(([key, value]) => ({ key, ...value })),
+        pairs: [...legacyPairs.values()].map((pair) => ({ ...pair, source: 'legacy' })),
+      },
+      v2: {
+        gamesDaily: v2GamesDaily,
+        pairs: v2Pairs,
+        pairsDaily: v2PairsDaily,
+        segmentsDaily: v2SegmentsDaily,
+        consentDaily: v2ConsentDaily,
+      },
+      subjects,
+      dataDictionary: {
+        era: 'legacy means data collected before schema v2; v2 means the extensible daily aggregate schema.',
+        source: 'solo, multiplayer, unknown, or legacy.',
+        accuracyBuckets: 'bucket_0 through bucket_9 represent 0-9% through 90-100%.',
+        scoreDiffBucket: 'Absolute Bangumi score difference: 0-0.2, 0.3-0.5, 0.6-1.0, or 1.1+.',
+        roundBucket: 'Answer position within a submitted game: 1-5, 6-10, 11-20, or 21+.',
+      },
+    }
+    return new Response(JSON.stringify(payload, null, 2), {
+      headers: {
+        ...this.apiHeaders(),
+        'content-type': 'application/json; charset=utf-8',
+        'content-disposition': `attachment; filename="rating-gate-analytics-${exportedAt.slice(0, 10)}.json"`,
+      },
+    })
   }
 
   private async handleAnalyticsBenchmark(request: Request) {
@@ -720,10 +1064,7 @@ export class RoomHub {
     const cached = this.benchmarkCache.get(cacheKey)
     const now = Date.now()
     if (cached && cached.expiresAt > now) return cached.stats
-    const entries = await this.state.storage.list<DistributionStats>({
-      prefix: `analytics:distribution:${mediaKind}:${mode}:`,
-      limit: 1000,
-    })
+    const entries = await this.listAllStorage<DistributionStats>(`analytics:distribution:${mediaKind}:${mode}:`)
     const aggregate = {
       buckets: Array.from({ length: 10 }, () => 0),
       total: 0,
@@ -736,49 +1077,91 @@ export class RoomHub {
       aggregate.total += Math.max(0, Number(stats.total) || 0)
       if (stats.updatedAt > aggregate.updatedAt) aggregate.updatedAt = stats.updatedAt
     }
+    const v2 = this.state.storage.sql.exec<Record<string, string | number>>(`SELECT
+      COALESCE(SUM(game_count), 0) AS total,
+      COALESCE(SUM(bucket_0), 0) AS bucket_0, COALESCE(SUM(bucket_1), 0) AS bucket_1,
+      COALESCE(SUM(bucket_2), 0) AS bucket_2, COALESCE(SUM(bucket_3), 0) AS bucket_3,
+      COALESCE(SUM(bucket_4), 0) AS bucket_4, COALESCE(SUM(bucket_5), 0) AS bucket_5,
+      COALESCE(SUM(bucket_6), 0) AS bucket_6, COALESCE(SUM(bucket_7), 0) AS bucket_7,
+      COALESCE(SUM(bucket_8), 0) AS bucket_8, COALESCE(SUM(bucket_9), 0) AS bucket_9,
+      COALESCE(MAX(updated_at), '') AS updated_at
+      FROM analytics_v2_games_daily WHERE media_kind = ? AND mode = ?`, mediaKind, mode).one()
+    aggregate.total += Math.max(0, Number(v2.total) || 0)
+    aggregate.buckets.forEach((_, index) => {
+      aggregate.buckets[index] += Math.max(0, Number(v2[`bucket_${index}`]) || 0)
+    })
+    if (String(v2.updated_at || '') > aggregate.updatedAt) aggregate.updatedAt = String(v2.updated_at)
     this.benchmarkCache.set(cacheKey, { expiresAt: now + benchmarkCacheTtlMs, stats: aggregate })
     return aggregate
   }
 
   private async buildAnalyticsReport() {
-    const consent =
+    const legacyConsent =
       (await this.state.storage.get<Partial<ConsentStats>>('analytics:consent:accepted')) ??
       ({ shownCount: 0, acceptedCount: 0, declinedCount: 0, updatedAt: '' } satisfies ConsentStats)
+    const v2Consent = this.state.storage.sql.exec<{
+      shownCount: number
+      acceptedCount: number
+      declinedCount: number
+      updatedAt: string
+    }>(`SELECT
+      COALESCE(SUM(shown_count), 0) AS shownCount,
+      COALESCE(SUM(accepted_count), 0) AS acceptedCount,
+      COALESCE(SUM(declined_count), 0) AS declinedCount,
+      COALESCE(MAX(updated_at), '') AS updatedAt
+      FROM analytics_v2_consent_daily`).one()
     const consentStats = {
-      shownCount: consent.shownCount ?? 0,
-      acceptedCount: consent.acceptedCount ?? 0,
-      declinedCount: consent.declinedCount ?? 0,
-      updatedAt: consent.updatedAt ?? '',
+      shownCount: Math.max(0, Number(legacyConsent.shownCount) || 0) + Math.max(0, Number(v2Consent.shownCount) || 0),
+      acceptedCount: Math.max(0, Number(legacyConsent.acceptedCount) || 0) + Math.max(0, Number(v2Consent.acceptedCount) || 0),
+      declinedCount: Math.max(0, Number(legacyConsent.declinedCount) || 0) + Math.max(0, Number(v2Consent.declinedCount) || 0),
+      updatedAt: String(v2Consent.updatedAt || legacyConsent.updatedAt || ''),
     } satisfies ConsentStats
     consentStats.shownCount = Math.max(
       consentStats.shownCount,
       consentStats.acceptedCount + consentStats.declinedCount,
     )
-    const distributionEntries = await this.state.storage.list<DistributionStats>({
-      prefix: 'analytics:distribution:',
-      limit: 1000,
-    })
-    const pairEntries = await this.state.storage.list<PairStats>({ prefix: 'analytics:pair:', limit: 1000 })
+    const distributionEntries = await this.listAllStorage<DistributionStats>('analytics:distribution:')
+    const pairEntries = await this.listAllStorage<PairStats>('analytics:pair:')
     const distributionGroups = new Map<string, { mediaKind: MediaKind; mode: Mode; buckets: number[]; total: number; updatedAt: string }>()
-    for (const [key, stats] of distributionEntries.entries()) {
-      const [, , mediaKind, mode] = key.split(':') as [string, string, MediaKind, Mode, string]
-      if (!mediaKinds.includes(mediaKind) || (mode !== 'classic' && mode !== 'timed')) continue
+    const addDistribution = (mediaKind: MediaKind, mode: Mode, buckets: number[], total: number, updatedAt: string) => {
+      if (!mediaKinds.includes(mediaKind) || (mode !== 'classic' && mode !== 'timed')) return
       const groupKey = `${mediaKind}:${mode}`
-      const current =
-        distributionGroups.get(groupKey) ??
-        ({ mediaKind, mode, buckets: Array.from({ length: 10 }, () => 0), total: 0, updatedAt: '' } satisfies {
-          mediaKind: MediaKind
-          mode: Mode
-          buckets: number[]
-          total: number
-          updatedAt: string
-        })
-      stats.buckets.slice(0, 10).forEach((value, index) => {
+      const current = distributionGroups.get(groupKey) ?? {
+        mediaKind,
+        mode,
+        buckets: Array.from({ length: 10 }, () => 0),
+        total: 0,
+        updatedAt: '',
+      }
+      buckets.slice(0, 10).forEach((value, index) => {
         current.buckets[index] = (current.buckets[index] ?? 0) + Math.max(0, Number(value) || 0)
       })
-      current.total += Math.max(0, Number(stats.total) || 0)
-      if (stats.updatedAt > current.updatedAt) current.updatedAt = stats.updatedAt
+      current.total += Math.max(0, Number(total) || 0)
+      if (updatedAt > current.updatedAt) current.updatedAt = updatedAt
       distributionGroups.set(groupKey, current)
+    }
+    for (const [key, stats] of distributionEntries.entries()) {
+      const [, , mediaKind, mode] = key.split(':') as [string, string, MediaKind, Mode, string]
+      addDistribution(mediaKind, mode, stats.buckets, stats.total, stats.updatedAt)
+    }
+    const v2Distributions = this.state.storage.sql.exec<Record<string, string | number>>(`SELECT
+      media_kind, mode,
+      SUM(game_count) AS total,
+      SUM(bucket_0) AS bucket_0, SUM(bucket_1) AS bucket_1,
+      SUM(bucket_2) AS bucket_2, SUM(bucket_3) AS bucket_3,
+      SUM(bucket_4) AS bucket_4, SUM(bucket_5) AS bucket_5,
+      SUM(bucket_6) AS bucket_6, SUM(bucket_7) AS bucket_7,
+      SUM(bucket_8) AS bucket_8, SUM(bucket_9) AS bucket_9,
+      MAX(updated_at) AS updated_at
+      FROM analytics_v2_games_daily GROUP BY media_kind, mode`).toArray()
+    for (const row of v2Distributions) {
+      addDistribution(
+        String(row.media_kind) as MediaKind,
+        String(row.mode) as Mode,
+        Array.from({ length: 10 }, (_, index) => Number(row[`bucket_${index}`]) || 0),
+        Number(row.total) || 0,
+        String(row.updated_at || ''),
+      )
     }
     const distributions = [...distributionGroups.values()]
     const accuracyBuckets = Array.from({ length: 10 }, () => 0)
@@ -798,7 +1181,76 @@ export class RoomHub {
     const subjectMaps = new Map(
       mediaKinds.map((kind) => [kind, new Map((this.allSubjects.get(kind) ?? []).map((subject) => [subject.id, subject]))]),
     )
-    const pairs = [...pairEntries.values()]
+    const pairGroups = new Map<string, PairStats>()
+    const addPair = (pair: PairStats) => {
+      if (!mediaKinds.includes(pair.mediaKind) || (pair.mode !== 'classic' && pair.mode !== 'timed')) return
+      const key = `${pair.mediaKind}:${pair.mode}:${pair.subjectAId}:${pair.subjectBId}`
+      const current = pairGroups.get(key)
+      if (!current) {
+        pairGroups.set(key, {
+          ...pair,
+          shownCount: Math.max(0, Number(pair.shownCount) || 0),
+          correctCount: Math.max(0, Number(pair.correctCount) || 0),
+          wrongCount: Math.max(0, Number(pair.wrongCount) || 0),
+          aSelectedCount: Math.max(0, Number(pair.aSelectedCount) || 0),
+          bSelectedCount: Math.max(0, Number(pair.bSelectedCount) || 0),
+          aWinnerCount: Math.max(0, Number(pair.aWinnerCount) || 0),
+          bWinnerCount: Math.max(0, Number(pair.bWinnerCount) || 0),
+          aWinnerCorrectCount: Math.max(0, Number(pair.aWinnerCorrectCount) || 0),
+          bWinnerCorrectCount: Math.max(0, Number(pair.bWinnerCorrectCount) || 0),
+        })
+        return
+      }
+      current.shownCount += Math.max(0, Number(pair.shownCount) || 0)
+      current.correctCount += Math.max(0, Number(pair.correctCount) || 0)
+      current.wrongCount += Math.max(0, Number(pair.wrongCount) || 0)
+      current.aSelectedCount += Math.max(0, Number(pair.aSelectedCount) || 0)
+      current.bSelectedCount += Math.max(0, Number(pair.bSelectedCount) || 0)
+      current.aWinnerCount += Math.max(0, Number(pair.aWinnerCount) || 0)
+      current.bWinnerCount += Math.max(0, Number(pair.bWinnerCount) || 0)
+      current.aWinnerCorrectCount += Math.max(0, Number(pair.aWinnerCorrectCount) || 0)
+      current.bWinnerCorrectCount += Math.max(0, Number(pair.bWinnerCorrectCount) || 0)
+      current.scoreA = pair.scoreA
+      current.scoreB = pair.scoreB
+      current.scoreDiffBucket = pair.scoreDiffBucket
+      if (pair.updatedAt > current.updatedAt) current.updatedAt = pair.updatedAt
+    }
+    for (const pair of pairEntries.values()) addPair(pair)
+    const v2Pairs = this.state.storage.sql.exec<Record<string, string | number>>(`SELECT
+      media_kind, mode, subject_a_id, subject_b_id,
+      MAX(score_a) AS score_a, MAX(score_b) AS score_b,
+      MAX(score_diff_bucket) AS score_diff_bucket,
+      SUM(shown_count) AS shown_count, SUM(correct_count) AS correct_count,
+      SUM(wrong_count) AS wrong_count, SUM(a_selected_count) AS a_selected_count,
+      SUM(b_selected_count) AS b_selected_count, SUM(a_winner_count) AS a_winner_count,
+      SUM(b_winner_count) AS b_winner_count,
+      SUM(a_winner_correct_count) AS a_winner_correct_count,
+      SUM(b_winner_correct_count) AS b_winner_correct_count,
+      MAX(updated_at) AS updated_at
+      FROM analytics_v2_pairs
+      GROUP BY media_kind, mode, subject_a_id, subject_b_id`).toArray()
+    for (const row of v2Pairs) {
+      addPair({
+        mediaKind: String(row.media_kind) as MediaKind,
+        mode: String(row.mode) as Mode,
+        subjectAId: Number(row.subject_a_id),
+        subjectBId: Number(row.subject_b_id),
+        scoreA: Number(row.score_a),
+        scoreB: Number(row.score_b),
+        scoreDiffBucket: String(row.score_diff_bucket),
+        shownCount: Number(row.shown_count) || 0,
+        correctCount: Number(row.correct_count) || 0,
+        wrongCount: Number(row.wrong_count) || 0,
+        aSelectedCount: Number(row.a_selected_count) || 0,
+        bSelectedCount: Number(row.b_selected_count) || 0,
+        aWinnerCount: Number(row.a_winner_count) || 0,
+        bWinnerCount: Number(row.b_winner_count) || 0,
+        aWinnerCorrectCount: Number(row.a_winner_correct_count) || 0,
+        bWinnerCorrectCount: Number(row.b_winner_correct_count) || 0,
+        updatedAt: String(row.updated_at || ''),
+      })
+    }
+    const pairs = [...pairGroups.values()]
     let pairShownTotal = 0
     let pairCorrectTotal = 0
     let pairWrongTotal = 0
@@ -849,14 +1301,22 @@ export class RoomHub {
         totalWrong: pairWrongTotal,
         topPairs,
       },
+      storage: {
+        schemaVersion: analyticsV2SchemaVersion,
+        legacyPairCount: pairEntries.size,
+        v2PairRows: v2Pairs.length,
+      },
     }
   }
 
   private async hydrateAnalyticsSubjectMaps(request: Request) {
-    const pairEntries = await this.state.storage.list<PairStats>({ prefix: 'analytics:pair:', limit: 1000 })
+    const pairEntries = await this.listAllStorage<PairStats>('analytics:pair:')
     const neededKinds = new Set<MediaKind>()
     for (const pair of pairEntries.values()) {
       if (mediaKinds.includes(pair.mediaKind)) neededKinds.add(pair.mediaKind)
+    }
+    for (const row of this.state.storage.sql.exec<{ media_kind: string }>('SELECT DISTINCT media_kind FROM analytics_v2_pairs')) {
+      if (mediaKinds.includes(row.media_kind as MediaKind)) neededKinds.add(row.media_kind as MediaKind)
     }
     await Promise.all(
       [...neededKinds].map((mediaKind) =>
@@ -887,13 +1347,15 @@ export class RoomHub {
 
     const mediaKind = this.sanitizeMediaKind(payload.mediaKind)
     const mode = this.sanitizeMode(payload.mode)
+    const source = this.analyticsSource(payload.source)
+    const preset = this.analyticsPreset(payload.preset)
     const length = this.analyticsLength(mode, payload.length)
     const answers = Array.isArray(payload.answers) ? payload.answers.slice(0, 80) : []
     const gameId = String(payload.gameId ?? '').trim().slice(0, 80)
     if (!gameId || answers.length === 0) {
       return Response.json({ ok: false, error: 'missing_game' }, { status: 400, headers: this.apiHeaders() })
     }
-    if (await this.isDuplicateGame(gameId)) {
+    if (await this.isLegacyDuplicateGame(gameId)) {
       return Response.json({ ok: true, duplicate: true }, { headers: this.apiHeaders() })
     }
 
@@ -912,14 +1374,25 @@ export class RoomHub {
     }
 
     const correct = validAnswers.filter((answer) => answer.correct).length
-    await this.updateDistributionStats(mediaKind, mode, length, correct, validAnswers.length)
-    await this.updatePairStats(mediaKind, mode, validAnswers)
+    const stored = this.storeAnalyticsV2({
+      gameId,
+      mediaKind,
+      mode,
+      source,
+      preset,
+      length,
+      correct,
+      answers: validAnswers,
+    })
+    if (!stored) return Response.json({ ok: true, duplicate: true }, { headers: this.apiHeaders() })
+    await this.rememberRecentGame(gameId)
+    this.benchmarkCache.delete(`${mediaKind}:${mode}`)
     return Response.json(
       {
         ok: true,
         acceptedAnswers: validAnswers.length,
         correct,
-        distributionKey: `analytics:distribution:${mediaKind}:${mode}:${length}`,
+        distributionKey: `analytics:v2:${mediaKind}:${mode}:${source}:${length}`,
       },
       { headers: this.apiHeaders() },
     )
@@ -943,74 +1416,150 @@ export class RoomHub {
     }
   }
 
-  private async updateDistributionStats(
-    mediaKind: MediaKind,
-    mode: Mode,
-    length: number,
-    correct: number,
-    total: number,
-  ) {
-    const key = `analytics:distribution:${mediaKind}:${mode}:${length}`
-    const current =
-      (await this.state.storage.get<DistributionStats>(key)) ??
-      ({ buckets: Array.from({ length: 10 }, () => 0), total: 0, updatedAt: '' } satisfies DistributionStats)
-    const bucket = this.accuracyBucket(correct, total)
-    current.buckets[bucket] = (current.buckets[bucket] ?? 0) + 1
-    current.total += 1
-    current.updatedAt = new Date().toISOString()
-    await this.state.storage.put(key, current)
-    this.benchmarkCache.delete(`${mediaKind}:${mode}`)
-  }
-
-  private async updatePairStats(
-    mediaKind: MediaKind,
-    mode: Mode,
-    answers: NonNullable<ReturnType<typeof this.normalizeAnalyticsAnswer>>[],
-  ) {
+  private storeAnalyticsV2(input: {
+    gameId: string
+    mediaKind: MediaKind
+    mode: Mode
+    source: AnalyticsSource
+    preset: AnalyticsPreset
+    length: number
+    correct: number
+    answers: NonNullable<ReturnType<RoomHub['normalizeAnalyticsAnswer']>>[]
+  }) {
     const now = new Date().toISOString()
-    for (const answer of answers) {
-      const [subjectA, subjectB] =
-        answer.left.id < answer.right.id ? [answer.left, answer.right] : [answer.right, answer.left]
-      const key = `analytics:pair:${mediaKind}:${mode}:${subjectA.id}:${subjectB.id}`
-      const current =
-        (await this.state.storage.get<PairStats>(key)) ??
-        ({
-          mediaKind,
-          mode,
-          subjectAId: subjectA.id,
-          subjectBId: subjectB.id,
-          scoreA: subjectA.score,
-          scoreB: subjectB.score,
-          scoreDiffBucket: this.diffBucket(Math.abs(subjectA.score - subjectB.score)),
-          shownCount: 0,
-          correctCount: 0,
-          wrongCount: 0,
-          aSelectedCount: 0,
-          bSelectedCount: 0,
-          aWinnerCount: 0,
-          bWinnerCount: 0,
-          aWinnerCorrectCount: 0,
-          bWinnerCorrectCount: 0,
-          updatedAt: '',
-        } satisfies PairStats)
-      current.shownCount += 1
-      current.correctCount += answer.correct ? 1 : 0
-      current.wrongCount += answer.correct ? 0 : 1
-      if (answer.selected.id === subjectA.id) current.aSelectedCount += 1
-      else current.bSelectedCount += 1
-      if (answer.winner.id === subjectA.id) {
-        current.aWinnerCount += 1
-        if (answer.correct) current.aWinnerCorrectCount += 1
-      } else {
-        current.bWinnerCount += 1
-        if (answer.correct) current.bWinnerCorrectCount += 1
-      }
-      current.scoreA = subjectA.score
-      current.scoreB = subjectB.score
-      current.scoreDiffBucket = this.diffBucket(answer.diff)
-      current.updatedAt = now
-      await this.state.storage.put(key, current)
-    }
+    const day = now.slice(0, 10)
+    const seedVersion = this.seedVersions.get(input.mediaKind) ?? 'unknown'
+    const bucket = this.accuracyBucket(input.correct, input.answers.length)
+    const bucketColumn = `bucket_${bucket}`
+    const cutoff = new Date(Date.now() - analyticsSeenRetentionDays * 24 * 60 * 60 * 1000).toISOString()
+    return this.state.storage.transactionSync(() => {
+      const inserted = this.state.storage.sql.exec(
+        'INSERT OR IGNORE INTO analytics_v2_seen_games(game_id, created_at) VALUES(?, ?)',
+        input.gameId,
+        now,
+      )
+      if (inserted.rowsWritten === 0) return false
+
+      this.state.storage.sql.exec('DELETE FROM analytics_v2_seen_games WHERE created_at < ?', cutoff)
+      this.state.storage.sql.exec(
+        `INSERT INTO analytics_v2_games_daily(
+          day, media_kind, mode, source, length, preset, game_count, answer_count, correct_count, ${bucketColumn}, updated_at
+        ) VALUES(?, ?, ?, ?, ?, ?, 1, ?, ?, 1, ?)
+        ON CONFLICT(day, media_kind, mode, source, length, preset) DO UPDATE SET
+          game_count = game_count + 1,
+          answer_count = answer_count + excluded.answer_count,
+          correct_count = correct_count + excluded.correct_count,
+          ${bucketColumn} = ${bucketColumn} + 1,
+          updated_at = excluded.updated_at`,
+        day,
+        input.mediaKind,
+        input.mode,
+        input.source,
+        input.length,
+        input.preset,
+        input.answers.length,
+        input.correct,
+        now,
+      )
+
+      input.answers.forEach((answer, index) => {
+        const [subjectA, subjectB] =
+          answer.left.id < answer.right.id ? [answer.left, answer.right] : [answer.right, answer.left]
+        const aSelected = answer.selected.id === subjectA.id ? 1 : 0
+        const bSelected = aSelected ? 0 : 1
+        const aWinner = answer.winner.id === subjectA.id ? 1 : 0
+        const bWinner = aWinner ? 0 : 1
+        const aWinnerCorrect = aWinner && answer.correct ? 1 : 0
+        const bWinnerCorrect = bWinner && answer.correct ? 1 : 0
+        const aShownLeft = answer.left.id === subjectA.id ? 1 : 0
+        const selectedLeft = answer.selected.id === answer.left.id ? 1 : 0
+        const winnerLeft = answer.winner.id === answer.left.id ? 1 : 0
+        const diffBucket = this.diffBucket(answer.diff)
+
+        this.state.storage.sql.exec(
+          `INSERT INTO analytics_v2_pairs(
+            media_kind, mode, source, subject_a_id, subject_b_id, score_a, score_b, votes_a, votes_b,
+            score_diff_bucket, seed_version, shown_count, correct_count, wrong_count,
+            a_selected_count, b_selected_count, a_winner_count, b_winner_count,
+            a_winner_correct_count, b_winner_correct_count, a_shown_left_count, a_shown_right_count,
+            selected_left_count, selected_right_count, winner_left_count, winner_right_count,
+            first_seen_at, updated_at
+          ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(media_kind, mode, source, subject_a_id, subject_b_id) DO UPDATE SET
+            score_a = excluded.score_a, score_b = excluded.score_b,
+            votes_a = excluded.votes_a, votes_b = excluded.votes_b,
+            score_diff_bucket = excluded.score_diff_bucket, seed_version = excluded.seed_version,
+            shown_count = shown_count + 1,
+            correct_count = correct_count + excluded.correct_count,
+            wrong_count = wrong_count + excluded.wrong_count,
+            a_selected_count = a_selected_count + excluded.a_selected_count,
+            b_selected_count = b_selected_count + excluded.b_selected_count,
+            a_winner_count = a_winner_count + excluded.a_winner_count,
+            b_winner_count = b_winner_count + excluded.b_winner_count,
+            a_winner_correct_count = a_winner_correct_count + excluded.a_winner_correct_count,
+            b_winner_correct_count = b_winner_correct_count + excluded.b_winner_correct_count,
+            a_shown_left_count = a_shown_left_count + excluded.a_shown_left_count,
+            a_shown_right_count = a_shown_right_count + excluded.a_shown_right_count,
+            selected_left_count = selected_left_count + excluded.selected_left_count,
+            selected_right_count = selected_right_count + excluded.selected_right_count,
+            winner_left_count = winner_left_count + excluded.winner_left_count,
+            winner_right_count = winner_right_count + excluded.winner_right_count,
+            updated_at = excluded.updated_at`,
+          input.mediaKind, input.mode, input.source, subjectA.id, subjectB.id,
+          subjectA.score, subjectB.score, subjectA.votes, subjectB.votes,
+          diffBucket, seedVersion, answer.correct ? 1 : 0, answer.correct ? 0 : 1,
+          aSelected, bSelected, aWinner, bWinner, aWinnerCorrect, bWinnerCorrect,
+          aShownLeft, aShownLeft ? 0 : 1, selectedLeft, selectedLeft ? 0 : 1,
+          winnerLeft, winnerLeft ? 0 : 1, now, now,
+        )
+
+        this.state.storage.sql.exec(
+          `INSERT INTO analytics_v2_pairs_daily(
+            day, media_kind, mode, source, subject_a_id, subject_b_id,
+            shown_count, correct_count, wrong_count, a_selected_count, b_selected_count,
+            selected_left_count, selected_right_count, winner_left_count, winner_right_count,
+            score_a, score_b, seed_version, updated_at
+          ) VALUES(?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(day, media_kind, mode, source, subject_a_id, subject_b_id) DO UPDATE SET
+            shown_count = shown_count + 1,
+            correct_count = correct_count + excluded.correct_count,
+            wrong_count = wrong_count + excluded.wrong_count,
+            a_selected_count = a_selected_count + excluded.a_selected_count,
+            b_selected_count = b_selected_count + excluded.b_selected_count,
+            selected_left_count = selected_left_count + excluded.selected_left_count,
+            selected_right_count = selected_right_count + excluded.selected_right_count,
+            winner_left_count = winner_left_count + excluded.winner_left_count,
+            winner_right_count = winner_right_count + excluded.winner_right_count,
+            score_a = excluded.score_a, score_b = excluded.score_b,
+            seed_version = excluded.seed_version, updated_at = excluded.updated_at`,
+          day, input.mediaKind, input.mode, input.source, subjectA.id, subjectB.id,
+          answer.correct ? 1 : 0, answer.correct ? 0 : 1, aSelected, bSelected,
+          selectedLeft, selectedLeft ? 0 : 1, winnerLeft, winnerLeft ? 0 : 1,
+          subjectA.score, subjectB.score, seedVersion, now,
+        )
+
+        const roundBucket = this.analyticsRoundBucket(index)
+        this.state.storage.sql.exec(
+          `INSERT INTO analytics_v2_segments_daily(
+            day, media_kind, mode, source, diff_bucket, round_bucket,
+            shown_count, correct_count, selected_left_count, selected_right_count,
+            winner_left_count, winner_right_count, updated_at
+          ) VALUES(?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(day, media_kind, mode, source, diff_bucket, round_bucket) DO UPDATE SET
+            shown_count = shown_count + 1,
+            correct_count = correct_count + excluded.correct_count,
+            selected_left_count = selected_left_count + excluded.selected_left_count,
+            selected_right_count = selected_right_count + excluded.selected_right_count,
+            winner_left_count = winner_left_count + excluded.winner_left_count,
+            winner_right_count = winner_right_count + excluded.winner_right_count,
+            updated_at = excluded.updated_at`,
+          day, input.mediaKind, input.mode, input.source, diffBucket, roundBucket,
+          answer.correct ? 1 : 0, selectedLeft, selectedLeft ? 0 : 1,
+          winnerLeft, winnerLeft ? 0 : 1, now,
+        )
+      })
+      return true
+    })
   }
 
   private yearOf(anime: Anime) {

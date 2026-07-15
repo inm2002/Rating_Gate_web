@@ -721,6 +721,17 @@ app.innerHTML = `
       <div class="admin-dashboard" id="admin-dashboard" hidden>
         <section class="admin-metrics" id="admin-metrics"></section>
 
+        <section class="admin-export-bar">
+          <div>
+            <strong>完整脱敏数据</strong>
+            <span>下载后可在本地生成统计报告；不包含密钥、IP、昵称或房间码。</span>
+          </div>
+          <div class="admin-export-actions">
+            <button class="ghost-button" id="admin-export-csv" type="button">下载组合 CSV</button>
+            <button class="primary-button" id="admin-export-json" type="button">下载完整 JSON</button>
+          </div>
+        </section>
+
         <section class="admin-grid">
           <article class="admin-card admin-card-wide admin-card-histogram">
             <div class="panel-title compact-title">
@@ -783,7 +794,7 @@ app.innerHTML = `
         同时会记录匿名的弹窗展示与选择次数，用于评估统计样本代表性。数据不会包含昵称、IP、房间码或个人身份，也不会保存完整个人答题历史；不同意也完全不影响游玩。
       </p>
       <div class="consent-points">
-        <span>会记录：题库、模式、答对数量、正确率区间、每题的两个作品 ID 和你的选择</span>
+        <span>会聚合记录：日期、题库、模式、单人/联机、答题阶段、作品 ID、左右位置和选择结果</span>
         <span>会聚合统计：弹窗展示次数、同意次数、拒绝次数</span>
         <span>不会记录：用户名、具体身份、房间成员关系、完整个人历史</span>
       </div>
@@ -927,6 +938,8 @@ const byId = {
   adminToken: $('admin-token') as HTMLInputElement,
   adminMessage: $('admin-message'),
   adminDashboard: $('admin-dashboard'),
+  adminExportCsv: $('admin-export-csv') as HTMLButtonElement,
+  adminExportJson: $('admin-export-json') as HTMLButtonElement,
   adminMetrics: $('admin-metrics'),
   adminAccuracyBars: $('admin-accuracy-bars'),
   adminMediaBars: $('admin-media-bars'),
@@ -2968,6 +2981,7 @@ function submitSoloAnalytics(reason: string) {
     gameId: soloGameId,
     mediaKind: settings.mediaKind,
     mode,
+    preset: activePreset ?? 'custom',
     length: mode === 'timed' ? TIME_LIMIT : stats.total,
     reason,
     settings,
@@ -3211,7 +3225,7 @@ function renderAdminReport(report: AdminAnalyticsReport) {
     ['有效赛果', `${gameTotal} 局`, `最近更新 ${formatDateTime(report.updatedAt)}`],
     ['同意率', `${consentRate}%`, `${report.consent.acceptedCount}/${consentDecisions || 0} 次选择`],
     ['答题样本', `${report.pairs.totalShown} 题`, `${answerAccuracy}% 平均正确率`],
-    ['题目组合', `${report.pairs.scannedPairs} 组`, '后台最多扫描 1000 组'],
+    ['题目组合', `${report.pairs.scannedPairs} 组`, '已合并全部历史与新版组合'],
   ]
     .map(
       ([label, value, hint]) => `
@@ -3329,6 +3343,52 @@ async function loadAdminAnalytics() {
   }
 }
 
+async function downloadAdminAnalytics(format: 'json' | 'csv') {
+  const token = byId.adminToken.value.trim()
+  if (!token) {
+    byId.adminMessage.textContent = '请先输入后台密钥并读取数据。'
+    return
+  }
+  const button = format === 'json' ? byId.adminExportJson : byId.adminExportCsv
+  const originalText = button.textContent
+  button.disabled = true
+  button.textContent = '正在生成...'
+  byId.adminMessage.textContent = '正在分页读取历史组合并生成脱敏导出文件...'
+  try {
+    const response = await fetch(`${ADMIN_ANALYTICS_URL}/export?format=${format}`, {
+      headers: { authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    })
+    if (!response.ok) {
+      let error = `HTTP ${response.status}`
+      try {
+        const data = (await response.json()) as { error?: string }
+        if (data.error) error = data.error
+      } catch {
+        // 非 JSON 错误页仅展示状态码。
+      }
+      throw new Error(error)
+    }
+    const blob = await response.blob()
+    const disposition = response.headers.get('content-disposition') ?? ''
+    const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? `rating-gate-analytics.${format}`
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    byId.adminMessage.textContent = `已生成 ${filename}。`
+  } catch (error) {
+    byId.adminMessage.textContent = `数据导出失败：${error instanceof Error ? error.message : '未知错误'}`
+  } finally {
+    button.disabled = false
+    button.textContent = originalText
+  }
+}
+
 function subjectFromRemote(subject: RemoteSubject | undefined): RatedSubject | null {
   if (!subject || typeof subject.score !== 'number') return null
   return {
@@ -3396,6 +3456,7 @@ function submitRoomAnalytics(room: RemoteRoom) {
     gameId: crypto.randomUUID(),
     mediaKind: room.mediaKind,
     mode: room.mode,
+    preset: activeRoomPreset ?? 'custom',
     length: room.length,
     settings: room.settings,
     result: {
@@ -3472,6 +3533,8 @@ function bindEvents() {
     event.preventDefault()
     void loadAdminAnalytics()
   })
+  byId.adminExportJson.addEventListener('click', () => void downloadAdminAnalytics('json'))
+  byId.adminExportCsv.addEventListener('click', () => void downloadAdminAnalytics('csv'))
   window.addEventListener('hashchange', () => {
     if (location.hash === '#admin') switchView('admin', { syncHash: false })
     else if (appView === 'admin') switchView('solo', { syncHash: false })

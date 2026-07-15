@@ -271,6 +271,34 @@ h1 {
   gap: 18px;
 }
 
+.admin-export-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border: 1px solid rgba(223, 227, 232, 0.92);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.88);
+  padding: 16px 18px;
+  box-shadow: var(--shadow-sm);
+}
+
+.admin-export-bar > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.admin-export-bar span {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.admin-export-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
+}
+
 .admin-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2169,6 +2197,12 @@ h1 {
   }
 
   .admin-hero {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-export-bar,
+  .admin-export-actions {
     align-items: stretch;
     flex-direction: column;
   }
