@@ -6,11 +6,13 @@
   "scripts": {
     "data:audit": "node scripts/audit-bangumi-pools.mjs",
     "data:seed": "node scripts/fetch-bangumi-seed.mjs",
+    "analytics:analyze": "node scripts/analyze-analytics.mjs",
     "dev": "vite",
     "dev:ws": "node scripts/ws-room-server.mjs",
     "build": "tsc && vite build",
     "test:smoke": "node scripts/smoke-test.mjs",
     "test:multiplayer": "node scripts/multiplayer-smoke-test.mjs",
+    "test:analytics": "node scripts/analytics-worker-test.mjs",
     "worker:deploy": "npm --prefix worker run deploy",
     "worker:deploy:ci": "npm --prefix worker ci && npm --prefix worker run deploy",
     "worker:dev": "npm --prefix worker run dev",

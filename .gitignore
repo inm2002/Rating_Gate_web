@@ -16,6 +16,11 @@ dist-ssr
 .wrangler/
 worker/.wrangler/
 
+# Local anonymous analytics exports and generated reports
+analytics-report/
+rating-gate-analytics-*.json
+rating-gate-pairs-*.csv
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

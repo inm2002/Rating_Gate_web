@@ -250,7 +250,7 @@ ratinggate.cn/api/*
 https://<站点域名>/#admin
 ```
 
-页面会要求输入 `ADMIN_TOKEN`，并通过 `Authorization: Bearer <token>` 请求 `/api/admin/analytics`。接口只返回聚合统计，不返回单局原始记录。
+页面会要求输入 `ADMIN_TOKEN`，并通过 `Authorization: Bearer <token>` 请求 `/api/admin/analytics`。接口只返回聚合统计，不返回单局原始记录。读取成功后可以下载完整脱敏 JSON 或题目组合 CSV；导出接口为 `/api/admin/analytics/export`，使用相同鉴权。
 
 后台页面不包含生产密钥；生产密钥只保存在 Cloudflare Worker Secret 中。后台接口会校验 `ADMIN_TOKEN`，连续错误请求过多时短时间返回 `429`。
 
@@ -328,6 +328,16 @@ curl -H "Authorization: Bearer <ADMIN_TOKEN>" https://<站点域名>/api/admin/a
 ```
 
 返回值中应包含 `games`、`pairs` 和 `consent` 三类聚合信息。
+
+完整脱敏导出验证：
+
+```bash
+curl -H "Authorization: Bearer <ADMIN_TOKEN>" \
+  "https://<站点域名>/api/admin/analytics/export?format=json" \
+  -o rating-gate-analytics.json
+```
+
+导出只包含匿名聚合，不包含 IP、User-Agent、昵称、房间码、管理员密钥或逐用户历史。
 
 匿名统计接口可以用 `POST /api/results` 验证。该接口只接受用户同意后的赛后统计请求，真实数据不会写入仓库。
 
